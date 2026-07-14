@@ -41,6 +41,9 @@ let currentUser = null;
 let remoteReady = false;
 let syncingRemote = false;
 let saveTimer = null;
+let remoteReloadTimer = null;
+let realtimeChannel = null;
+let remotePollTimer = null;
 sessionStorage.removeItem("profitUnlocked");
 
 const supabaseClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -691,7 +694,7 @@ async function loadTableRows(table) {
   return (data || []).map((row) => ({ ...row.data, id: row.id }));
 }
 
-async function loadStateFromSupabase() {
+async function loadStateFromSupabase({ pushLocalWhenEmpty = true, replaceWhenEmpty = false } = {}) {
   remoteReady = false;
   const remoteState = {};
   let hasRemoteData = false;
@@ -701,11 +704,11 @@ async function loadStateFromSupabase() {
     if (remoteState[table].length) hasRemoteData = true;
   }
 
-  if (hasRemoteData) state = remoteState;
+  if (hasRemoteData || replaceWhenEmpty) state = remoteState;
   normalizeState();
   remoteReady = true;
 
-  if (!hasRemoteData && DATA_TABLES.some((table) => state[table].length)) {
+  if (pushLocalWhenEmpty && !hasRemoteData && DATA_TABLES.some((table) => state[table].length)) {
     await saveStateToSupabase();
   }
 }
@@ -740,6 +743,46 @@ async function saveStateToSupabase() {
   }
 }
 
+function queueRemoteReload() {
+  if (!currentUser || !remoteReady || !supabaseClient) return;
+  window.clearTimeout(remoteReloadTimer);
+  remoteReloadTimer = window.setTimeout(async () => {
+    if (syncingRemote) {
+      queueRemoteReload();
+      return;
+    }
+    try {
+      await loadStateFromSupabase({ pushLocalWhenEmpty: false, replaceWhenEmpty: true });
+      render();
+      renderQuoteBuilder();
+    } catch (error) {
+      console.error("Supabase live reload failed", error);
+    }
+  }, 800);
+}
+
+function startLiveSync() {
+  if (!supabaseClient || realtimeChannel) return;
+  let channel = supabaseClient.channel("workshop-live-sync");
+  DATA_TABLES.forEach((table) => {
+    channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, queueRemoteReload);
+  });
+  realtimeChannel = channel.subscribe();
+  window.clearInterval(remotePollTimer);
+  remotePollTimer = window.setInterval(queueRemoteReload, 15000);
+}
+
+function stopLiveSync() {
+  window.clearTimeout(remoteReloadTimer);
+  window.clearInterval(remotePollTimer);
+  remoteReloadTimer = null;
+  remotePollTimer = null;
+  if (supabaseClient && realtimeChannel) {
+    supabaseClient.removeChannel(realtimeChannel);
+  }
+  realtimeChannel = null;
+}
+
 async function handleSignedIn(user) {
   currentUser = user;
   setLoginMessage("Loading workshop data...");
@@ -747,6 +790,7 @@ async function handleSignedIn(user) {
   render();
   setVehicleMode("new");
   renderQuoteBuilder();
+  startLiveSync();
   showAuthenticatedApp(true);
   setLoginMessage("");
 }
@@ -822,6 +866,7 @@ document.querySelector("#logoutBtn").addEventListener("click", async () => {
   currentUser = null;
   remoteReady = false;
   profitUnlocked = false;
+  stopLiveSync();
   showAuthenticatedApp(false);
   setLoginMessage("Signed out.");
   window.clearTimeout(saveTimer);
