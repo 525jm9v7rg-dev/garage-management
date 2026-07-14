@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OG Autos Workshop Manager</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <section id="loginScreen" class="login-screen">
+      <form id="loginForm" class="login-card">
+        <div class="brand login-brand">
+          <span class="brand-mark">OG</span>
+          <div>
+            <strong>OG Autos Workshop Manager</strong>
+            <small>Sign in to continue</small>
+          </div>
+        </div>
+        <label>Email<input id="loginEmail" required type="email" autocomplete="email" /></label>
+        <label>Password<input id="loginPassword" required type="password" autocomplete="current-password" /></label>
+        <p id="loginMessage" class="login-message"></p>
+        <button class="primary-button" type="submit">Log in</button>
+      </form>
+    </section>
+
+    <div id="appShell" class="app-shell auth-locked">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">GD</span>
+          <div>
+            <strong>OG Autos Workshop Manager</strong>
+            <small>Workshop manager</small>
+          </div>
+        </div>
+        <nav class="nav" aria-label="Main">
+          <button class="nav-item active" data-view="dashboard">Dashboard</button>
+          <button class="nav-item" data-view="jobs">Quotes</button>
+          <button class="nav-item" data-view="calendar">Calendar</button>
+          <button class="nav-item" data-view="customers">Customers</button>
+          <button class="nav-item" data-view="vehicles">Vehicles</button>
+          <button class="nav-item" data-view="invoices">Invoices</button>
+          <button class="nav-item" data-view="profit">Profit</button>
+        </nav>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Today</p>
+            <h1 id="pageTitle">Dashboard</h1>
+          </div>
+          <div class="topbar-actions">
+            <input id="globalSearch" type="search" placeholder="Search customers, jobs, plates..." />
+            <button id="exportDataBtn" class="ghost-button" type="button">Export data</button>
+            <button id="importDataBtn" class="ghost-button" type="button">Import data</button>
+            <input id="importDataFile" class="hidden-file" type="file" accept="application/json,.json" />
+            <button id="newJobBtn" class="primary-button">New quote</button>
+            <button id="logoutBtn" class="ghost-button" type="button">Log out</button>
+          </div>
+        </header>
+
+        <section id="dashboard" class="view active-view">
+          <div class="stat-grid">
+            <article class="stat-card">
+              <span>Open jobs</span>
+              <strong id="openJobsCount">0</strong>
+            </article>
+            <article class="stat-card">
+              <span>Jobs today</span>
+              <strong id="dueTodayCount">0</strong>
+            </article>
+            <article class="stat-card">
+              <span>Unpaid invoices</span>
+              <strong id="unpaidInvoicesCount">0</strong>
+            </article>
+          </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Workshop queue</h2>
+              <button class="ghost-button" data-view-link="jobs">View all</button>
+            </div>
+            <div id="queueList" class="list"></div>
+          </section>
+        </section>
+
+        <section id="jobs" class="view">
+          <div class="section-toolbar">
+            <div class="segmented" role="group" aria-label="Job status filter">
+              <button class="segment active" data-job-filter="all">All</button>
+              <button class="segment" data-job-filter="Booked">Booked</button>
+              <button class="segment" data-job-filter="In progress">In progress</button>
+              <button class="segment" data-job-filter="Ready">Ready</button>
+              <button class="segment" data-job-filter="Collected">Collected</button>
+            </div>
+          </div>
+          <div id="jobsGrid" class="card-grid"></div>
+        </section>
+
+        <section id="calendar" class="view">
+          <div class="section-toolbar">
+            <button id="prevMonthBtn" class="ghost-button" type="button">Previous</button>
+            <h2 id="calendarMonth">Calendar</h2>
+            <button id="nextMonthBtn" class="ghost-button" type="button">Next</button>
+          </div>
+          <div id="calendarGrid" class="calendar-grid"></div>
+        </section>
+
+        <section id="customers" class="view">
+          <div class="two-column">
+            <form id="customerForm" class="form-panel">
+              <h2>Add customer</h2>
+              <label>Name<input required name="name" placeholder="Alex Morgan" /></label>
+              <label>Phone<input required name="phone" placeholder="07700 900123" /></label>
+              <label>Email<input name="email" type="email" placeholder="alex@example.com" /></label>
+              <label>Postcode<input name="postcode" placeholder="CM0 7LB" /></label>
+              <label>Full address<textarea name="address" placeholder="House number, street, town, county"></textarea></label>
+              <label class="check-row"><input name="vatCustomer" type="checkbox" /> VAT customer</label>
+              <button class="primary-button" type="submit">Save customer</button>
+            </form>
+            <div id="customersList" class="table-panel"></div>
+          </div>
+        </section>
+
+        <section id="vehicles" class="view">
+          <div class="two-column">
+            <form id="vehicleForm" class="form-panel">
+              <h2>Add vehicle</h2>
+              <label>Registration<input required name="plate" placeholder="AB12 CDE" /></label>
+              <label>Make and model<input required name="model" placeholder="Ford Transit" /></label>
+              <label>Owner<select required name="owner"></select></label>
+              <label>Mileage<input required name="mileage" type="number" min="0" placeholder="72450" /></label>
+              <label>MOT due date<input name="motDue" type="date" /></label>
+              <button class="primary-button" type="submit">Save vehicle</button>
+            </form>
+            <div id="vehiclesList" class="table-panel"></div>
+          </div>
+        </section>
+
+        <section id="invoices" class="view">
+          <div id="invoicesList" class="table-panel full"></div>
+        </section>
+
+        <section id="profit" class="view">
+          <div class="two-column">
+            <section class="form-panel">
+              <h2>Add expense</h2>
+              <p class="muted">Profit is counted from labour only after the invoice is marked paid. Parts and expenses are shown separately.</p>
+              <form id="expenseForm">
+                <label>Expense type
+                  <select name="type" id="expenseType">
+                    <option value="mechanic">Mechanic wages</option>
+                    <option value="rent">Rent</option>
+                    <option value="garage-parts">Garage parts</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
+                <label id="mechanicNameField">Mechanic name<input name="mechanicName" placeholder="Mechanic name" /></label>
+                <label>Description<input name="description" placeholder="Weekly wages, July rent, parts order..." /></label>
+                <label>Amount<input required name="amount" type="number" min="0" step="0.01" placeholder="250.00" /></label>
+                <button class="primary-button" type="submit">Add expense</button>
+              </form>
+            </section>
+            <div id="profitList" class="table-panel"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="jobDialog">
+      <form id="jobForm" method="dialog" class="dialog-form">
+        <div class="dialog-header">
+          <h2 id="jobDialogTitle">New quote</h2>
+          <button type="button" class="icon-button" id="closeDialog" aria-label="Close">x</button>
+        </div>
+        <div class="mode-switch" role="group" aria-label="Vehicle source">
+          <label><input type="radio" name="vehicleMode" value="new" checked /> Add new vehicle</label>
+          <label><input type="radio" name="vehicleMode" value="existing" /> Existing vehicle</label>
+        </div>
+        <fieldset id="existingVehicleFields" class="field-group">
+          <legend>Existing vehicle</legend>
+          <label>Vehicle<select required name="vehicle"></select></label>
+        </fieldset>
+        <fieldset id="newVehicleFields" class="field-group hidden">
+          <legend>Vehicle details</legend>
+          <div class="mode-switch" role="group" aria-label="Customer source">
+            <label><input type="radio" name="customerMode" value="existing" checked /> Existing customer</label>
+            <label><input type="radio" name="customerMode" value="new" /> Add new customer</label>
+          </div>
+          <label id="existingCustomerField">Customer<select name="newVehicleCustomer"></select></label>
+          <div class="form-grid">
+            <label>Registration<input name="newPlate" placeholder="AB12 CDE" /></label>
+            <label>Make and model<input name="newModel" placeholder="Ford Transit" /></label>
+            <label>Mileage<input name="newMileage" type="number" min="0" placeholder="72450" /></label>
+            <label>MOT due date<input name="newMotDue" type="date" /></label>
+          </div>
+          <div id="newCustomerFields">
+            <h3>Customer details</h3>
+            <div class="form-grid">
+            <label>Name<input name="newCustomerName" placeholder="Alex Morgan" /></label>
+            <label>Phone<input name="newCustomerPhone" placeholder="07700 900123" /></label>
+            <label>Email<input name="newCustomerEmail" type="email" placeholder="alex@example.com" /></label>
+            <label>Postcode<input name="newCustomerPostcode" placeholder="CM0 7LB" /></label>
+            <label>Full address<textarea name="newCustomerAddress" placeholder="House number, street, town, county"></textarea></label>
+            <label class="check-row"><input name="newCustomerVat" type="checkbox" /> VAT customer</label>
+            </div>
+          </div>
+        </fieldset>
+        <label>Job date<input required name="due" type="date" /></label>
+        <fieldset class="field-group">
+          <legend>Job quote lines</legend>
+          <div class="quote-row">
+            <label>Labour description<input id="labourItemName" placeholder="Diagnostics, fitting, service labour..." /></label>
+            <label>Hours / qty<input id="labourItemQty" type="number" min="0.1" step="0.1" value="1" /></label>
+            <label>Rate<input id="labourItemPrice" type="number" min="0" step="0.01" placeholder="60.00" /></label>
+            <button id="addLabourBtn" class="ghost-button" type="button">Add labour</button>
+          </div>
+          <div class="quote-row">
+            <label>Part description<input id="partItemName" placeholder="Oil filter, tyre, bulb..." /></label>
+            <label>Qty<input id="partItemQty" type="number" min="1" value="1" /></label>
+            <label>Unit price<input id="partItemPrice" type="number" min="0" step="0.01" placeholder="25.00" /></label>
+            <button id="addPartBtn" class="ghost-button" type="button">Add part</button>
+          </div>
+          <div id="quoteItemsList" class="quote-items"></div>
+          <div class="quote-total">
+            Labour: <strong id="quoteLabourTotal">£0.00</strong>
+            Parts: <strong id="quotePartsTotal">£0.00</strong>
+            Total quote: <strong id="quoteGrandTotal">£0.00</strong>
+          </div>
+        </fieldset>
+        <div class="form-grid">
+          <label>Assigned mechanic<select name="mechanic"></select></label>
+          <label>Status<select name="status">
+            <option>Booked</option>
+            <option>In progress</option>
+            <option>Ready</option>
+            <option>Collected</option>
+          </select></label>
+        </div>
+        <label>Notes<textarea name="notes" placeholder="Customer concerns, diagnostics, parts needed..."></textarea></label>
+        <button id="saveJobBtn" class="primary-button" type="submit">Create quote</button>
+      </form>
+    </dialog>
+
+    <dialog id="invoiceDialog">
+      <div class="invoice-dialog">
+        <div class="dialog-header no-print">
+          <h2>Invoice</h2>
+          <button type="button" class="icon-button" id="closeInvoiceDialog" aria-label="Close">x</button>
+        </div>
+        <div id="invoiceContent" class="invoice-document"></div>
+        <div class="invoice-actions no-print">
+          <button id="printInvoiceBtn" class="primary-button" type="button">Print</button>
+          <button id="emailInvoiceBtn" class="ghost-button" type="button">Email invoice</button>
+        </div>
+      </div>
+    </dialog>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
