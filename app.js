@@ -17,6 +17,7 @@ const STORAGE_KEY = "garageDeskStateFirstUse";
 const SUPABASE_URL = "https://jlnfsafgonfuzuetgmhj.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpsbmZzYWZnb25mdXp1ZXRnbWhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5MzQ4MzcsImV4cCI6MjA5OTUxMDgzN30.Nwg6AfGPGGiofZjO4BLubjRsx6QqRSgEiBwvZ-LKjCQ";
 const DATA_TABLES = ["customers", "vehicles", "jobs", "invoices", "expenses"];
+const DEFAULT_MECHANICS = ["DOM"];
 
 const seedData = {
   customers: [],
@@ -174,7 +175,7 @@ function mechanicOptions() {
   const assignedNames = state.jobs
     .map((job) => job.mechanic)
     .filter((name) => name && name !== "Unassigned");
-  return ["Unassigned", ...new Set([...expenseNames, ...assignedNames])];
+  return ["Unassigned", ...new Set([...DEFAULT_MECHANICS, ...expenseNames, ...assignedNames])];
 }
 
 function vehicleSummary(vehicle) {
