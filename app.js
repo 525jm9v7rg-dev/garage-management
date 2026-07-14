@@ -38,6 +38,8 @@ let activeEditJobId = null;
 let calendarDate = new Date(today);
 let profitUnlocked = false;
 let currentUser = null;
+let currentProfile = null;
+let loginLogs = [];
 let remoteReady = false;
 let syncingRemote = false;
 let saveTimer = null;
@@ -212,25 +214,43 @@ function jobSearchText(job) {
   return [quoteTitle(job), job.status, job.mechanic, job.notes, vehicle?.plate, vehicle?.model, owner?.name, quoteItems].join(" ").toLowerCase();
 }
 
+function currentRole() {
+  return currentProfile?.role || "sales";
+}
+
+function isAdmin() {
+  return currentRole() === "admin";
+}
+
+function canView(viewId) {
+  return !["profit", "userLogs"].includes(viewId) || isAdmin();
+}
+
+function applyRoleAccess() {
+  document.querySelectorAll('[data-view="profit"], [data-view="userLogs"]').forEach((item) => {
+    item.classList.toggle("hidden", !isAdmin());
+  });
+  if (!canView(document.querySelector(".active-view")?.id)) setView("dashboard");
+}
+
 function setView(viewId) {
+  if (!canView(viewId)) {
+    window.alert("You do not have permission to open this section.");
+    setView("dashboard");
+    return;
+  }
   if (viewId === "profit" && !unlockProfitSection()) return;
   if (viewId !== "profit") profitUnlocked = false;
   views.forEach((view) => view.classList.toggle("active-view", view.id === viewId));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === viewId));
-  pageTitle.textContent = viewId === "jobs" ? "Quotes" : viewId[0].toUpperCase() + viewId.slice(1);
+  pageTitle.textContent = viewId === "jobs" ? "Quotes" : viewId === "userLogs" ? "User Logs" : viewId[0].toUpperCase() + viewId.slice(1);
   render();
 }
 
 function unlockProfitSection() {
-  if (profitUnlocked) return true;
-  const enteredPassword = window.prompt("Enter profit password");
-  if (enteredPassword === PROFIT_PASSWORD) {
-    profitUnlocked = true;
-    render();
-    return true;
-  }
-  if (enteredPassword !== null) window.alert("Incorrect password");
-  return false;
+  if (!isAdmin()) return false;
+  profitUnlocked = true;
+  return true;
 }
 
 function statusBadge(status) {
@@ -388,6 +408,10 @@ function renderInvoices() {
 }
 
 function renderProfit() {
+  if (!isAdmin()) {
+    document.querySelector("#profitList").innerHTML = `<div class="empty">You do not have permission to view profit.</div>`;
+    return;
+  }
   if (!profitUnlocked) {
     document.querySelector("#profitList").innerHTML = `<div class="empty">Profit section locked.</div>`;
     return;
@@ -419,6 +443,25 @@ function renderProfit() {
     <table><thead><tr><th>Type</th><th>Mechanic</th><th>Description</th><th>Amount</th><th></th></tr></thead><tbody>${expenseRows || `<tr><td colspan="5">No expenses yet.</td></tr>`}</tbody></table>
     <h2>Quotes</h2>
     <table><thead><tr><th>Quote</th><th>Vehicle</th><th>Payment</th><th>Labour</th><th>Parts</th><th>Profit counted</th></tr></thead><tbody>${jobRows || `<tr><td colspan="6">No quotes yet.</td></tr>`}</tbody></table>
+  `;
+}
+
+function renderUserLogs() {
+  const panel = document.querySelector("#userLogsList");
+  if (!isAdmin()) {
+    panel.innerHTML = `<div class="empty">You do not have permission to view user logs.</div>`;
+    return;
+  }
+  const rows = loginLogs.map((log) => `
+    <tr>
+      <td>${log.user_email || "-"}</td>
+      <td>${log.action || "-"}</td>
+      <td>${log.created_at ? new Date(log.created_at).toLocaleString("en-GB") : "-"}</td>
+    </tr>
+  `).join("");
+  panel.innerHTML = `
+    <h2>User logs</h2>
+    <table><thead><tr><th>User</th><th>Action</th><th>Time</th></tr></thead><tbody>${rows || `<tr><td colspan="3">No user logs yet.</td></tr>`}</tbody></table>
   `;
 }
 
@@ -783,13 +826,56 @@ function stopLiveSync() {
   realtimeChannel = null;
 }
 
+async function loadCurrentProfile(user) {
+  currentProfile = { user_id: user.id, email: user.email, role: "sales" };
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("user_id,email,role")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (error) {
+    console.error("Profile load failed", error);
+    return;
+  }
+  if (data) currentProfile = { ...data, role: String(data.role || "sales").trim().toLowerCase() };
+}
+
+async function loadLoginLogs() {
+  loginLogs = [];
+  if (!isAdmin()) return;
+  const { data, error } = await supabaseClient
+    .from("login_logs")
+    .select("user_email,action,created_at")
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (error) {
+    console.error("Login logs load failed", error);
+    return;
+  }
+  loginLogs = data || [];
+}
+
+async function recordLoginAction(action, user = currentUser) {
+  if (!supabaseClient || !user) return;
+  const { error } = await supabaseClient.from("login_logs").insert({
+    user_email: user.email,
+    action,
+    created_at: new Date().toISOString()
+  });
+  if (error) console.error("Login log save failed", error);
+}
+
 async function handleSignedIn(user) {
   currentUser = user;
   setLoginMessage("Loading workshop data...");
+  await loadCurrentProfile(user);
+  await recordLoginAction("login", user);
   await loadStateFromSupabase();
+  await loadLoginLogs();
   render();
   setVehicleMode("new");
   renderQuoteBuilder();
+  applyRoleAccess();
   startLiveSync();
   showAuthenticatedApp(true);
   setLoginMessage("");
@@ -827,6 +913,7 @@ function render() {
   renderVehicles();
   renderInvoices();
   renderProfit();
+  renderUserLogs();
 }
 
 document.querySelectorAll("[data-view], [data-view-link]").forEach((button) => {
@@ -863,7 +950,11 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
 });
 
 document.querySelector("#logoutBtn").addEventListener("click", async () => {
+  const signedOutUser = currentUser;
+  await recordLoginAction("logout", signedOutUser);
   currentUser = null;
+  currentProfile = null;
+  loginLogs = [];
   remoteReady = false;
   profitUnlocked = false;
   stopLiveSync();
