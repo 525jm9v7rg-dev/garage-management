@@ -218,12 +218,19 @@
             <label>Part description<input id="partItemName" placeholder="Oil filter, tyre, bulb..." /></label>
             <label>Qty<input id="partItemQty" type="number" min="1" value="1" /></label>
             <label>Unit price<input id="partItemPrice" type="number" min="0" step="0.01" placeholder="25.00" /></label>
+            <label>Status<select id="partItemStatus">
+              <option>Needed</option>
+              <option>Ordered</option>
+              <option>Arrived</option>
+              <option>Fitted</option>
+            </select></label>
             <button id="addPartBtn" class="ghost-button" type="button">Add part</button>
           </div>
           <div id="quoteItemsList" class="quote-items"></div>
           <div class="quote-total">
             Labour: <strong id="quoteLabourTotal">£0.00</strong>
             Parts: <strong id="quotePartsTotal">£0.00</strong>
+            <span id="quoteVatLine" class="hidden">VAT 20%: <strong id="quoteVatTotal">£0.00</strong></span>
             Total quote: <strong id="quoteGrandTotal">£0.00</strong>
           </div>
         </fieldset>

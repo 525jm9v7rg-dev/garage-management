@@ -306,6 +306,11 @@ textarea {
   color: var(--muted);
 }
 
+.parts-status {
+  color: #dc2626;
+  font-weight: 900;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -600,7 +605,7 @@ dialog::backdrop {
 }
 
 .quote-row:nth-of-type(2) {
-  grid-template-columns: minmax(180px, 1fr) 90px 130px auto;
+  grid-template-columns: minmax(180px, 1fr) 90px 130px 140px auto;
 }
 
 .quote-items {
@@ -611,7 +616,7 @@ dialog::backdrop {
 
 .quote-line {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr minmax(120px, auto) auto auto;
   gap: 10px;
   align-items: center;
   padding: 9px 0;

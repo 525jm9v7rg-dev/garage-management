@@ -71,6 +71,7 @@ const formatDate = (value) => {
 };
 const lineTotal = (item) => Number(item.qty || 0) * Number(item.unitPrice || 0);
 const itemType = (item) => item.type || "part";
+const partStatus = (item) => item.status || "Needed";
 const labourItemsTotal = (items = []) => items.filter((item) => itemType(item) === "labour").reduce((total, item) => total + lineTotal(item), 0);
 const partsTotal = (items = []) => items.filter((item) => itemType(item) === "part").reduce((total, item) => total + lineTotal(item), 0);
 const jobLabourTotal = (job) => labourItemsTotal(job?.lineItems || []);
@@ -123,7 +124,10 @@ function normalizeState() {
   });
   state.jobs.forEach((job) => {
     if (!Array.isArray(job.lineItems)) job.lineItems = [];
-    job.lineItems = job.lineItems.map((item) => ({ type: item.type || "part", name: item.name, qty: Number(item.qty || 1), unitPrice: Number(item.unitPrice || 0) }));
+    job.lineItems = job.lineItems.map((item) => {
+      const type = item.type || "part";
+      return { type, name: item.name, qty: Number(item.qty || 1), unitPrice: Number(item.unitPrice || 0), status: type === "part" ? item.status || "Needed" : "" };
+    });
     if (Number(job.estimate || 0) > 0) {
       job.lineItems.unshift({ type: "labour", name: `${job.type || "Workshop"} labour`, qty: 1, unitPrice: Number(job.estimate || 0) });
       job.estimate = 0;
@@ -185,6 +189,17 @@ function vehicleSummary(vehicle) {
 function quoteTitle(job) {
   const firstLine = (job.lineItems || [])[0]?.name;
   return firstLine || (job.vehicle ? vehicleLabel(job.vehicle) : "Workshop quote");
+}
+
+function partsStatusSummary(job) {
+  const parts = (job.lineItems || []).filter((item) => itemType(item) === "part");
+  if (!parts.length) return "No parts";
+  const counts = parts.reduce((summary, item) => {
+    const status = partStatus(item);
+    summary[status] = (summary[status] || 0) + 1;
+    return summary;
+  }, {});
+  return Object.entries(counts).map(([status, count]) => `${status}: ${count}`).join(", ");
 }
 
 function jobSearchText(job) {
@@ -256,6 +271,7 @@ function renderJobs() {
             <span>Mechanic: ${job.mechanic || "Unassigned"}</span>
             <span>Labour: ${money(jobLabourTotal(job))}</span>
             <span>Parts: ${money(partsTotal(job.lineItems))}</span>
+            <span class="parts-status">Parts status: ${partsStatusSummary(job)}</span>
             <span>Total quote: ${money(jobTotal(job))}</span>
             <span class="job-note">${job.notes || "No notes"}</span>
           </div>
@@ -437,15 +453,38 @@ function setCustomerMode(mode) {
   });
 }
 
+function selectedQuoteCustomer() {
+  const form = document.querySelector("#jobForm");
+  const vehicleMode = form.querySelector('input[name="vehicleMode"]:checked')?.value || "new";
+  if (vehicleMode === "existing") {
+    const vehicle = byId("vehicles", form.querySelector('select[name="vehicle"]').value);
+    return vehicle ? byId("customers", vehicle.owner) : null;
+  }
+  const customerMode = form.querySelector('input[name="customerMode"]:checked')?.value || "existing";
+  if (customerMode === "new") {
+    return { vatCustomer: form.querySelector('input[name="newCustomerVat"]').checked };
+  }
+  return byId("customers", form.querySelector('select[name="newVehicleCustomer"]').value);
+}
+
+function quoteHasVat() {
+  return Boolean(selectedQuoteCustomer()?.vatCustomer);
+}
+
 function renderQuoteBuilder() {
   const labourTotal = labourItemsTotal(activeQuoteItems);
   const partTotal = partsTotal(activeQuoteItems);
+  const netTotal = labourTotal + partTotal;
+  const vatTotal = quoteHasVat() ? netTotal * VAT_RATE : 0;
+  const quoteVatLine = document.querySelector("#quoteVatLine");
   document.querySelector("#quoteItemsList").innerHTML = activeQuoteItems.length
-    ? activeQuoteItems.map((item, index) => `<div class="quote-line"><span><strong>${item.qty}x ${item.name}</strong><br><small class="muted">${itemType(item) === "labour" ? "Labour" : "Part"} - ${money(item.unitPrice)} each</small></span><strong>${money(lineTotal(item))}</strong><button class="small-button" type="button" data-remove-quote-item="${index}">Remove</button></div>`).join("")
+    ? activeQuoteItems.map((item, index) => `<div class="quote-line"><span><strong>${item.qty}x ${item.name}</strong><br><small class="muted">${itemType(item) === "labour" ? "Labour" : `<span class="parts-status">Part - ${partStatus(item)}</span>`} - ${money(item.unitPrice)} each</small></span>${itemType(item) === "part" ? `<select data-part-status-index="${index}">${["Needed", "Ordered", "Arrived", "Fitted"].map((status) => `<option ${status === partStatus(item) ? "selected" : ""}>${status}</option>`).join("")}</select>` : ""}<strong>${money(lineTotal(item))}</strong><button class="small-button" type="button" data-remove-quote-item="${index}">Remove</button></div>`).join("")
     : `<div class="empty">No extra labour or parts added yet.</div>`;
   document.querySelector("#quoteLabourTotal").textContent = money(labourTotal);
   document.querySelector("#quotePartsTotal").textContent = money(partTotal);
-  document.querySelector("#quoteGrandTotal").textContent = money(labourTotal + partTotal);
+  document.querySelector("#quoteVatTotal").textContent = money(vatTotal);
+  quoteVatLine.classList.toggle("hidden", vatTotal === 0);
+  document.querySelector("#quoteGrandTotal").textContent = money(netTotal + vatTotal);
 }
 
 function resetQuoteForm() {
@@ -499,12 +538,23 @@ function invoiceHtml(invoiceId) {
   const { invoice, job, vehicle, customer } = getInvoiceDetails(invoiceId);
   if (!invoice || !job) return `<div class="empty">Invoice not found.</div>`;
   const items = job.lineItems || [];
-  const rows = items.map((item) => `<tr><td>${item.name}<br><small class="muted">${itemType(item) === "labour" ? "Labour" : "Part"}</small></td><td>${item.qty}</td><td>${money(item.unitPrice)}</td><td>${money(lineTotal(item))}</td></tr>`).join("");
   const vatEnabled = isVatInvoice(invoice);
+  const rows = items.map((item) => {
+    const net = lineTotal(item);
+    const vat = vatEnabled ? net * VAT_RATE : 0;
+    const description = `${item.name}<br><small class="muted">${itemType(item) === "labour" ? "Labour" : "Part"}</small>`;
+    return vatEnabled
+      ? `<tr><td>${description}</td><td>${item.qty}</td><td>${money(item.unitPrice)}</td><td>${money(net)}</td><td>20%</td><td>${money(vat)}</td><td>${money(net + vat)}</td></tr>`
+      : `<tr><td>${description}</td><td>${item.qty}</td><td>${money(item.unitPrice)}</td><td>${money(net)}</td></tr>`;
+  }).join("");
+  const invoiceHead = vatEnabled
+    ? `<thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th>Net</th><th>VAT rate</th><th>VAT</th><th>Total</th></tr></thead>`
+    : `<thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th>Total</th></tr></thead>`;
   const vatRows = vatEnabled
-    ? `<tr><th colspan="3">Subtotal</th><th>${money(invoiceSubtotal(invoice))}</th></tr>
-        <tr><th colspan="3">VAT 20%</th><th>${money(invoiceVatAmount(invoice))}</th></tr>`
+    ? `<tr><th colspan="6">Net total</th><th>${money(invoiceSubtotal(invoice))}</th></tr>
+        <tr><th colspan="6">Total VAT</th><th>${money(invoiceVatAmount(invoice))}</th></tr>`
     : "";
+  const totalColspan = vatEnabled ? 6 : 3;
 
   return `
     <div class="invoice-title">
@@ -527,16 +577,15 @@ function invoiceHtml(invoiceId) {
       <div><strong>Vehicle</strong><br>${vehicle ? `${vehicle.plate} - ${vehicle.model}` : "-"}<br>${vehicle ? `${Number(vehicle.mileage).toLocaleString()} mi` : ""}</div>
     </div>
     <table>
-      <thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th>Total</th></tr></thead>
+      ${invoiceHead}
       <tbody>${rows}</tbody>
       <tfoot>
-        <tr><th colspan="3">Labour total</th><th>${money(jobLabourTotal(job))}</th></tr>
-        <tr><th colspan="3">Parts total</th><th>${money(partsTotal(job.lineItems))}</th></tr>
+        <tr><th colspan="${totalColspan}">${vatEnabled ? "Labour total (net)" : "Labour total"}</th><th>${money(jobLabourTotal(job))}</th></tr>
+        <tr><th colspan="${totalColspan}">${vatEnabled ? "Parts total (net)" : "Parts total"}</th><th>${money(partsTotal(job.lineItems))}</th></tr>
         ${vatRows}
-        <tr><th colspan="3">Total due</th><th>${money(invoiceTotal(invoice))}</th></tr>
+        <tr><th colspan="${totalColspan}">Grand total</th><th>${money(invoiceTotal(invoice))}</th></tr>
       </tfoot>
     </table>
-    <p class="invoice-note">Notes: ${job.notes || "No notes"}</p>
   `;
 }
 
@@ -551,10 +600,10 @@ function emailInvoice(invoiceId) {
   if (!invoice || !job) return;
   const subject = encodeURIComponent(`Invoice ${invoice.id.toUpperCase()} from ${business.name}`);
   const vatText = isVatInvoice(invoice)
-    ? `\nSubtotal: ${money(invoiceSubtotal(invoice))}\nVAT 20%: ${money(invoiceVatAmount(invoice))}`
+    ? `\nNet total: ${money(invoiceSubtotal(invoice))}\nTotal VAT 20%: ${money(invoiceVatAmount(invoice))}`
     : "";
   const body = encodeURIComponent(
-    `Hi ${customer?.name || ""},\n\nPlease find your invoice details below.\n\nInvoice: ${invoice.id.toUpperCase()}\nBusiness: ${business.name}\nAddress: ${business.address}\nCustomer address: ${customer?.address || "-"}\nVehicle: ${vehicle ? `${vehicle.plate} - ${vehicle.model}` : "-"}\nQuote: ${quoteTitle(job)}\nLabour: ${money(jobLabourTotal(job))}\nParts: ${money(partsTotal(job.lineItems))}${vatText}\nTotal: ${money(invoiceTotal(invoice))}\nDue: ${formatDate(invoice.due)}\n\nThanks,\n${business.name}`
+    `Hi ${customer?.name || ""},\n\nPlease find your invoice details below.\n\nInvoice: ${invoice.id.toUpperCase()}\nBusiness: ${business.name}\nAddress: ${business.address}\nCustomer address: ${customer?.address || "-"}\nVehicle: ${vehicle ? `${vehicle.plate} - ${vehicle.model}` : "-"}\nQuote: ${quoteTitle(job)}\nLabour: ${money(jobLabourTotal(job))}\nParts: ${money(partsTotal(job.lineItems))}${vatText}\nGrand total: ${money(invoiceTotal(invoice))}\nDue: ${formatDate(invoice.due)}\n\nThanks,\n${business.name}`
   );
   window.location.href = `mailto:${customer?.email || ""}?subject=${subject}&body=${body}`;
 }
@@ -805,30 +854,42 @@ document.querySelector("#emailInvoiceBtn").addEventListener("click", () => {
 });
 
 document.querySelectorAll('#jobForm input[name="vehicleMode"]').forEach((radio) => {
-  radio.addEventListener("change", (event) => setVehicleMode(event.target.value));
+  radio.addEventListener("change", (event) => {
+    setVehicleMode(event.target.value);
+    renderQuoteBuilder();
+  });
 });
 
 document.querySelectorAll('#jobForm input[name="customerMode"]').forEach((radio) => {
-  radio.addEventListener("change", (event) => setCustomerMode(event.target.value));
+  radio.addEventListener("change", (event) => {
+    setCustomerMode(event.target.value);
+    renderQuoteBuilder();
+  });
 });
 
-function addQuoteItem(type, nameSelector, qtySelector, priceSelector) {
+["vehicle", "newVehicleCustomer", "newCustomerVat"].forEach((name) => {
+  document.querySelector(`#jobForm [name="${name}"]`).addEventListener("change", renderQuoteBuilder);
+});
+
+function addQuoteItem(type, nameSelector, qtySelector, priceSelector, statusSelector) {
   const nameInput = nameSelector ? document.querySelector(nameSelector) : null;
   const qtyInput = document.querySelector(qtySelector);
   const priceInput = document.querySelector(priceSelector);
+  const statusInput = statusSelector ? document.querySelector(statusSelector) : null;
   const name = type === "labour" ? "Labour" : nameInput.value.trim();
   const qty = Number(qtyInput.value || 1);
   const unitPrice = Number(priceInput.value || 0);
   if (!name || qty <= 0) return;
-  activeQuoteItems.push({ type, name, qty, unitPrice });
+  activeQuoteItems.push({ type, name, qty, unitPrice, status: type === "part" ? statusInput?.value || "Needed" : "" });
   if (nameInput) nameInput.value = "";
   qtyInput.value = 1;
   priceInput.value = "";
+  if (statusInput) statusInput.value = "Needed";
   renderQuoteBuilder();
 }
 
 document.querySelector("#addLabourBtn").addEventListener("click", () => addQuoteItem("labour", null, "#labourItemQty", "#labourItemPrice"));
-document.querySelector("#addPartBtn").addEventListener("click", () => addQuoteItem("part", "#partItemName", "#partItemQty", "#partItemPrice"));
+document.querySelector("#addPartBtn").addEventListener("click", () => addQuoteItem("part", "#partItemName", "#partItemQty", "#partItemPrice", "#partItemStatus"));
 
 document.querySelector("#jobForm").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -862,12 +923,13 @@ document.querySelector("#jobForm").addEventListener("submit", (event) => {
   if (activeEditJobId) {
     const invoice = state.invoices.find((item) => item.job === job.id);
     if (invoice) {
+      invoice.vatEnabled = Boolean(customerForJob(job)?.vatCustomer);
       invoice.amount = invoiceTotal(invoice);
       invoice.due = job.due;
     }
   } else {
     state.jobs.unshift(job);
-    const invoice = { id: makeId("i"), job: job.id, amount: 0, status: "Unpaid", due: job.due, vatEnabled: false };
+    const invoice = { id: makeId("i"), job: job.id, amount: 0, status: "Unpaid", due: job.due, vatEnabled: Boolean(customerForJob(job)?.vatCustomer) };
     invoice.amount = invoiceTotal(invoice);
     state.invoices.unshift(invoice);
   }
@@ -920,6 +982,12 @@ document.querySelector("#expenseForm").addEventListener("submit", (event) => {
 document.addEventListener("change", (event) => {
   const jobId = event.target.dataset.jobStatus;
   const mechanicJobId = event.target.dataset.jobMechanic;
+  const partStatusIndex = event.target.dataset.partStatusIndex;
+  if (partStatusIndex !== undefined) {
+    activeQuoteItems[Number(partStatusIndex)].status = event.target.value;
+    renderQuoteBuilder();
+    return;
+  }
   if (jobId) {
     byId("jobs", jobId).status = event.target.value;
     save();
