@@ -154,6 +154,10 @@ function vehicleLabel(vehicleId) {
   return `${vehicle.plate} - ${vehicle.model}`;
 }
 
+function vehicleRegistration(vehicleId) {
+  return byId("vehicles", vehicleId)?.plate || "Unknown registration";
+}
+
 function ownerName(ownerId) {
   return byId("customers", ownerId)?.name || "Unknown owner";
 }
@@ -241,8 +245,8 @@ function renderJobs() {
         <article class="job-card">
           <div class="job-card-header">
             <div>
-              <h3>${quoteTitle(job)}</h3>
-              <span class="muted">${vehicleLabel(job.vehicle)}</span>
+              <h3>${vehicleRegistration(job.vehicle)}</h3>
+              <span class="muted">${quoteTitle(job)} - ${byId("vehicles", job.vehicle)?.model || "Unknown model"}</span>
             </div>
             ${statusBadge(job.status)}
           </div>
