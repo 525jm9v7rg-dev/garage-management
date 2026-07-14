@@ -231,8 +231,15 @@ function unlockProfitSection() {
 }
 
 function statusBadge(status) {
-  const tone = status === "Paid" || status === "Collected" ? "good" : status === "Ready" ? "warn" : "";
-  return `<span class="badge ${tone}">${status}</span>`;
+  return `<span class="badge ${statusTone(status)}">${status}</span>`;
+}
+
+function statusTone(status) {
+  if (status === "Booked" || status === "Unpaid") return "bad";
+  if (status === "In progress") return "warn";
+  if (status === "Ready" || status === "Paid") return "good";
+  if (status === "Collected") return "done";
+  return "";
 }
 
 function renderDashboard() {
@@ -258,7 +265,7 @@ function renderJobs() {
 
   document.querySelector("#jobsGrid").innerHTML = filtered.length
     ? filtered.map((job) => `
-        <article class="job-card">
+        <article class="job-card ${statusTone(job.status)}">
           <div class="job-card-header">
             <div>
               <h3>${vehicleRegistration(job.vehicle)}</h3>

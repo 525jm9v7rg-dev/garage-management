@@ -338,6 +338,32 @@ textarea {
   color: var(--bad);
 }
 
+.badge.done {
+  background: #e5e7eb;
+  color: #4b5563;
+}
+
+.job-card {
+  border-left: 8px solid var(--line);
+}
+
+.job-card.bad {
+  border-left-color: #dc2626;
+}
+
+.job-card.warn {
+  border-left-color: #f59e0b;
+}
+
+.job-card.good {
+  border-left-color: #16a34a;
+}
+
+.job-card.done {
+  border-left-color: #9ca3af;
+  opacity: 0.86;
+}
+
 .section-toolbar {
   margin-bottom: 16px;
 }
