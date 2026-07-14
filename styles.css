@@ -593,7 +593,7 @@ dialog::backdrop {
 
 .quote-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) 100px 130px auto;
+  grid-template-columns: 120px 130px auto;
   gap: 10px;
   align-items: end;
   margin-bottom: 10px;

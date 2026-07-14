@@ -813,21 +813,21 @@ document.querySelectorAll('#jobForm input[name="customerMode"]').forEach((radio)
 });
 
 function addQuoteItem(type, nameSelector, qtySelector, priceSelector) {
-  const nameInput = document.querySelector(nameSelector);
+  const nameInput = nameSelector ? document.querySelector(nameSelector) : null;
   const qtyInput = document.querySelector(qtySelector);
   const priceInput = document.querySelector(priceSelector);
-  const name = nameInput.value.trim();
+  const name = type === "labour" ? "Labour" : nameInput.value.trim();
   const qty = Number(qtyInput.value || 1);
   const unitPrice = Number(priceInput.value || 0);
   if (!name || qty <= 0) return;
   activeQuoteItems.push({ type, name, qty, unitPrice });
-  nameInput.value = "";
+  if (nameInput) nameInput.value = "";
   qtyInput.value = 1;
   priceInput.value = "";
   renderQuoteBuilder();
 }
 
-document.querySelector("#addLabourBtn").addEventListener("click", () => addQuoteItem("labour", "#labourItemName", "#labourItemQty", "#labourItemPrice"));
+document.querySelector("#addLabourBtn").addEventListener("click", () => addQuoteItem("labour", null, "#labourItemQty", "#labourItemPrice"));
 document.querySelector("#addPartBtn").addEventListener("click", () => addQuoteItem("part", "#partItemName", "#partItemQty", "#partItemPrice"));
 
 document.querySelector("#jobForm").addEventListener("submit", (event) => {
