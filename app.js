@@ -254,7 +254,10 @@ function renderJobs() {
             <span>Total quote: ${money(jobTotal(job))}</span>
             <span class="job-note">${job.notes || "No notes"}</span>
           </div>
-          <button class="small-button" type="button" data-job-edit="${job.id}">Edit quote</button>
+          <div class="row-actions">
+            <button class="small-button" type="button" data-job-edit="${job.id}">Edit quote</button>
+            <button class="small-button danger-button" type="button" data-job-delete="${job.id}">Delete job</button>
+          </div>
           <label>Mechanic
             <select data-job-mechanic="${job.id}">
               ${mechanicOptions().map((name) => `<option value="${name}" ${name === (job.mechanic || "Unassigned") ? "selected" : ""}>${name}</option>`).join("")}
@@ -959,6 +962,18 @@ document.addEventListener("click", (event) => {
   const editJobId = event.target.dataset.jobEdit;
   if (editJobId) {
     openEditQuoteDialog(editJobId);
+    return;
+  }
+
+  const deleteJobId = event.target.dataset.jobDelete;
+  if (deleteJobId) {
+    const job = byId("jobs", deleteJobId);
+    const confirmed = window.confirm(`Delete ${job ? quoteTitle(job) : "this job"} and its invoice?`);
+    if (!confirmed) return;
+    state.jobs = state.jobs.filter((item) => item.id !== deleteJobId);
+    state.invoices = state.invoices.filter((invoice) => invoice.job !== deleteJobId);
+    save();
+    render();
     return;
   }
 

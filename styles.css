@@ -524,6 +524,12 @@ tr:last-child td {
   cursor: pointer;
 }
 
+.danger-button {
+  border-color: #fecaca;
+  color: var(--bad);
+  font-weight: 800;
+}
+
 dialog {
   width: min(560px, calc(100vw - 28px));
   border: 0;
