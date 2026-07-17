@@ -370,7 +370,7 @@ function renderCustomers() {
     .map((customer) => {
       const vehicles = customerVehicles(customer.id);
       const vehicleList = vehicles.length ? vehicles.map((vehicle) => `<div><strong>${vehicle.model}</strong><br><span class="muted">${vehicle.plate} - ${Number(vehicle.mileage || 0).toLocaleString()} mi - MOT ${formatDate(vehicle.motDue)}</span></div>`).join("") : "-";
-      return `<tr><td><strong>${customer.name}</strong><br><span class="muted">${customer.phone}<br>${customer.email || "-"}<br>${customer.address || "No address saved"}<br>${customer.vatCustomer ? "VAT customer" : "No VAT"}</span><br><button class="small-button" data-customer-vat="${customer.id}">${customer.vatCustomer ? "Remove VAT" : "Mark VAT"}</button></td><td>${vehicleList}</td></tr>`;
+      return `<tr><td><strong>${customer.name}</strong><br><span class="muted">${customer.phone}<br>${customer.email || "-"}<br>${customer.address || "No address saved"}<br>${customer.vatCustomer ? "VAT customer" : "No VAT"}</span><br><div class="row-actions"><button class="small-button" data-customer-edit="${customer.id}">Edit</button><button class="small-button" data-customer-vat="${customer.id}">${customer.vatCustomer ? "Remove VAT" : "Mark VAT"}</button></div></td><td>${vehicleList}</td></tr>`;
     })
     .join("");
 
@@ -378,6 +378,32 @@ function renderCustomers() {
     <h2>Customers</h2>
     <table><thead><tr><th>Customer</th><th>Make, model, mileage and MOT</th></tr></thead><tbody>${rows || `<tr><td colspan="2">No customers found.</td></tr>`}</tbody></table>
   `;
+}
+
+function resetCustomerForm() {
+  const form = document.querySelector("#customerForm");
+  form.reset();
+  form.elements.customerId.value = "";
+  document.querySelector("#customerFormTitle").textContent = "Add customer";
+  document.querySelector("#saveCustomerBtn").textContent = "Save customer";
+  document.querySelector("#cancelCustomerEditBtn").classList.add("hidden");
+}
+
+function editCustomer(customerId) {
+  const customer = byId("customers", customerId);
+  if (!customer) return;
+  const form = document.querySelector("#customerForm");
+  form.elements.customerId.value = customer.id;
+  form.elements.name.value = customer.name || "";
+  form.elements.phone.value = customer.phone || "";
+  form.elements.email.value = customer.email || "";
+  form.elements.postcode.value = customer.postcode || "";
+  form.elements.address.value = customer.address || "";
+  form.elements.vatCustomer.checked = Boolean(customer.vatCustomer);
+  document.querySelector("#customerFormTitle").textContent = "Edit customer";
+  document.querySelector("#saveCustomerBtn").textContent = "Update customer";
+  document.querySelector("#cancelCustomerEditBtn").classList.remove("hidden");
+  form.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderVehicles() {
@@ -1119,11 +1145,35 @@ document.querySelector("#jobForm").addEventListener("submit", (event) => {
 document.querySelector("#customerForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
-  state.customers.push({ id: makeId("c"), name: form.get("name"), phone: form.get("phone"), email: form.get("email"), address: form.get("address"), postcode: form.get("postcode"), vatCustomer: form.has("vatCustomer") });
-  event.currentTarget.reset();
+  const customerId = form.get("customerId");
+  const customer = customerId ? byId("customers", customerId) : null;
+  const nextCustomer = {
+    id: customerId || makeId("c"),
+    name: form.get("name"),
+    phone: form.get("phone"),
+    email: form.get("email"),
+    address: form.get("address"),
+    postcode: form.get("postcode"),
+    vatCustomer: form.has("vatCustomer")
+  };
+  if (customer) {
+    Object.assign(customer, nextCustomer);
+  } else {
+    state.customers.push(nextCustomer);
+  }
+  state.invoices.forEach((invoice) => {
+    const job = byId("jobs", invoice.job);
+    if (customerForJob(job)?.id === nextCustomer.id) {
+      invoice.vatEnabled = Boolean(invoice.vatEnabled && nextCustomer.vatCustomer);
+      invoice.amount = invoiceTotal(invoice);
+    }
+  });
+  resetCustomerForm();
   save();
   render();
 });
+
+document.querySelector("#cancelCustomerEditBtn").addEventListener("click", resetCustomerForm);
 
 document.querySelector("#vehicleForm").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -1173,6 +1223,12 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const customerEditId = event.target.dataset.customerEdit;
+  if (customerEditId) {
+    editCustomer(customerEditId);
+    return;
+  }
+
   const customerVatId = event.target.dataset.customerVat;
   if (customerVatId) {
     const customer = byId("customers", customerVatId);

@@ -110,14 +110,18 @@
         <section id="customers" class="view">
           <div class="two-column">
             <form id="customerForm" class="form-panel">
-              <h2>Add customer</h2>
+              <h2 id="customerFormTitle">Add customer</h2>
+              <input name="customerId" type="hidden" />
               <label>Name<input required name="name" placeholder="Alex Morgan" /></label>
               <label>Phone<input required name="phone" placeholder="07700 900123" /></label>
               <label>Email<input name="email" type="email" placeholder="alex@example.com" /></label>
               <label>Postcode<input name="postcode" placeholder="CM0 7LB" /></label>
               <label>Full address<textarea name="address" placeholder="House number, street, town, county"></textarea></label>
               <label class="check-row"><input name="vatCustomer" type="checkbox" /> VAT customer</label>
-              <button class="primary-button" type="submit">Save customer</button>
+              <div class="row-actions">
+                <button id="saveCustomerBtn" class="primary-button" type="submit">Save customer</button>
+                <button id="cancelCustomerEditBtn" class="ghost-button hidden" type="button">Cancel edit</button>
+              </div>
             </form>
             <div id="customersList" class="table-panel"></div>
           </div>
