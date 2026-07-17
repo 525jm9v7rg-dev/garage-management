@@ -9,7 +9,8 @@ const today = dateKey(new Date());
 
 const business = {
   name: "OG Automotives Limited",
-  address: "Unit 1 Foxhall Road, CM0 7LB"
+  address: "Unit 1 Foxhall Road, CM0 7LB",
+  vatNumber: "519417090"
 };
 const VAT_RATE = 0.2;
 const PROFIT_PASSWORD = "240710";
@@ -648,6 +649,7 @@ function invoiceHtml(invoiceId) {
       <div>
         <h3>${business.name}</h3>
         <div class="muted">${business.address}</div>
+        ${vatEnabled ? `<div class="muted">VAT No. ${business.vatNumber}</div>` : ""}
       </div>
       <div>
         <strong>${invoice.id.toUpperCase()}</strong><br>
@@ -687,7 +689,7 @@ function emailInvoice(invoiceId) {
   if (!invoice || !job) return;
   const subject = encodeURIComponent(`Invoice ${invoice.id.toUpperCase()} from ${business.name}`);
   const vatText = isVatInvoice(invoice)
-    ? `\nNet total: ${money(invoiceSubtotal(invoice))}\nTotal VAT 20%: ${money(invoiceVatAmount(invoice))}`
+    ? `\nVAT No: ${business.vatNumber}\nNet total: ${money(invoiceSubtotal(invoice))}\nTotal VAT 20%: ${money(invoiceVatAmount(invoice))}`
     : "";
   const body = encodeURIComponent(
     `Hi ${customer?.name || ""},\n\nPlease find your invoice details below.\n\nInvoice: ${invoice.id.toUpperCase()}\nBusiness: ${business.name}\nAddress: ${business.address}\nCustomer address: ${customer?.address || "-"}\nVehicle: ${vehicle ? `${vehicle.plate} - ${vehicle.model}` : "-"}\nQuote: ${quoteTitle(job)}\nLabour: ${money(jobLabourTotal(job))}\nParts: ${money(partsTotal(job.lineItems))}${vatText}\nGrand total: ${money(invoiceTotal(invoice))}\nDue: ${formatDate(invoice.due)}\n\nThanks,\n${business.name}`
