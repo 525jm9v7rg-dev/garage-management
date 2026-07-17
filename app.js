@@ -494,18 +494,24 @@ function renderUserLogs() {
 }
 
 function renderSelects() {
+  const selectedOwner = document.querySelector('#vehicleForm select[name="owner"]').value;
+  const selectedQuoteCustomer = document.querySelector('#jobForm select[name="newVehicleCustomer"]').value;
+  const selectedQuoteVehicle = document.querySelector('#jobForm select[name="vehicle"]').value;
+  const assignedMechanic = document.querySelector('#jobForm select[name="mechanic"]').value || "Unassigned";
   const ownerOptions = state.customers.length
     ? state.customers.map((customer) => `<option value="${customer.id}">${customer.name}</option>`).join("")
     : `<option value="">Add a customer first</option>`;
   document.querySelector('#vehicleForm select[name="owner"]').innerHTML = ownerOptions;
   document.querySelector('#jobForm select[name="newVehicleCustomer"]').innerHTML = ownerOptions;
+  document.querySelector('#vehicleForm select[name="owner"]').value = state.customers.some((customer) => customer.id === selectedOwner) ? selectedOwner : document.querySelector('#vehicleForm select[name="owner"]').value;
+  document.querySelector('#jobForm select[name="newVehicleCustomer"]').value = state.customers.some((customer) => customer.id === selectedQuoteCustomer) ? selectedQuoteCustomer : document.querySelector('#jobForm select[name="newVehicleCustomer"]').value;
 
   const vehicleOptions = state.vehicles.length
     ? state.vehicles.map((vehicle) => `<option value="${vehicle.id}">${vehicle.plate} - ${vehicle.model} (${ownerName(vehicle.owner)})</option>`).join("")
     : `<option value="">No vehicles yet</option>`;
   document.querySelector('#jobForm select[name="vehicle"]').innerHTML = vehicleOptions;
+  document.querySelector('#jobForm select[name="vehicle"]').value = state.vehicles.some((vehicle) => vehicle.id === selectedQuoteVehicle) ? selectedQuoteVehicle : document.querySelector('#jobForm select[name="vehicle"]').value;
 
-  const assignedMechanic = document.querySelector('#jobForm select[name="mechanic"]').value || "Unassigned";
   const mechanicSelectOptions = mechanicOptions().map((name) => `<option value="${name}">${name}</option>`).join("");
   document.querySelector('#jobForm select[name="mechanic"]').innerHTML = mechanicSelectOptions;
   document.querySelector('#jobForm select[name="mechanic"]').value = mechanicOptions().includes(assignedMechanic) ? assignedMechanic : "Unassigned";
@@ -1093,6 +1099,7 @@ document.querySelector("#jobForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
   let vehicleId = form.get("vehicle");
+  const existingJob = activeEditJobId ? byId("jobs", activeEditJobId) : null;
 
   if (form.get("vehicleMode") === "new") {
     let customerId = form.get("newVehicleCustomer");
@@ -1104,7 +1111,11 @@ document.querySelector("#jobForm").addEventListener("submit", (event) => {
     state.vehicles.push({ id: vehicleId, plate: form.get("newPlate").toUpperCase(), model: form.get("newModel"), owner: customerId, mileage: Number(form.get("newMileage")), motDue: form.get("newMotDue") });
   }
 
-  const job = activeEditJobId ? byId("jobs", activeEditJobId) : {
+  if (activeEditJobId && form.get("vehicleMode") === "existing" && !vehicleId) {
+    vehicleId = existingJob?.vehicle;
+  }
+
+  const job = existingJob || {
     id: makeId("j")
   };
   Object.assign(job, {
