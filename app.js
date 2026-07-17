@@ -9,6 +9,7 @@ const today = dateKey(new Date());
 
 const business = {
   name: "OG Automotives Limited",
+  vatName: "OG Autos Services",
   address: "Unit 1 Foxhall Road, CM0 7LB",
   vatNumber: "519417090"
 };
@@ -114,6 +115,10 @@ function invoiceVatAmount(invoice) {
 
 function invoiceTotal(invoice) {
   return invoiceSubtotal(invoice) + invoiceVatAmount(invoice);
+}
+
+function invoiceBusinessName(invoice) {
+  return isVatInvoice(invoice) ? business.vatName : business.name;
 }
 
 function normalizeState() {
@@ -643,11 +648,12 @@ function invoiceHtml(invoiceId) {
         <tr><th colspan="6">Total VAT</th><th>${money(invoiceVatAmount(invoice))}</th></tr>`
     : "";
   const totalColspan = vatEnabled ? 6 : 3;
+  const senderName = invoiceBusinessName(invoice);
 
   return `
     <div class="invoice-title">
       <div>
-        <h3>${business.name}</h3>
+        <h3>${senderName}</h3>
         <div class="muted">${business.address}</div>
         ${vatEnabled ? `<div class="muted">VAT No. ${business.vatNumber}</div>` : ""}
       </div>
@@ -687,12 +693,13 @@ function showInvoice(invoiceId) {
 function emailInvoice(invoiceId) {
   const { invoice, job, vehicle, customer } = getInvoiceDetails(invoiceId);
   if (!invoice || !job) return;
-  const subject = encodeURIComponent(`Invoice ${invoice.id.toUpperCase()} from ${business.name}`);
+  const senderName = invoiceBusinessName(invoice);
+  const subject = encodeURIComponent(`Invoice ${invoice.id.toUpperCase()} from ${senderName}`);
   const vatText = isVatInvoice(invoice)
     ? `\nVAT No: ${business.vatNumber}\nNet total: ${money(invoiceSubtotal(invoice))}\nTotal VAT 20%: ${money(invoiceVatAmount(invoice))}`
     : "";
   const body = encodeURIComponent(
-    `Hi ${customer?.name || ""},\n\nPlease find your invoice details below.\n\nInvoice: ${invoice.id.toUpperCase()}\nBusiness: ${business.name}\nAddress: ${business.address}\nCustomer address: ${customer?.address || "-"}\nVehicle: ${vehicle ? `${vehicle.plate} - ${vehicle.model}` : "-"}\nQuote: ${quoteTitle(job)}\nLabour: ${money(jobLabourTotal(job))}\nParts: ${money(partsTotal(job.lineItems))}${vatText}\nGrand total: ${money(invoiceTotal(invoice))}\nDue: ${formatDate(invoice.due)}\n\nThanks,\n${business.name}`
+    `Hi ${customer?.name || ""},\n\nPlease find your invoice details below.\n\nInvoice: ${invoice.id.toUpperCase()}\nBusiness: ${senderName}\nAddress: ${business.address}\nCustomer address: ${customer?.address || "-"}\nVehicle: ${vehicle ? `${vehicle.plate} - ${vehicle.model}` : "-"}\nQuote: ${quoteTitle(job)}\nLabour: ${money(jobLabourTotal(job))}\nParts: ${money(partsTotal(job.lineItems))}${vatText}\nGrand total: ${money(invoiceTotal(invoice))}\nDue: ${formatDate(invoice.due)}\n\nThanks,\n${senderName}`
   );
   window.location.href = `mailto:${customer?.email || ""}?subject=${subject}&body=${body}`;
 }
