@@ -13,6 +13,7 @@ const business = {
 };
 const VAT_RATE = 0.2;
 const PROFIT_PASSWORD = "240710";
+const SALES_INACTIVITY_MS = 10 * 60 * 1000;
 const STORAGE_KEY = "garageDeskStateFirstUse";
 const SUPABASE_URL = "https://jlnfsafgonfuzuetgmhj.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpsbmZzYWZnb25mdXp1ZXRnbWhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5MzQ4MzcsImV4cCI6MjA5OTUxMDgzN30.Nwg6AfGPGGiofZjO4BLubjRsx6QqRSgEiBwvZ-LKjCQ";
@@ -46,6 +47,7 @@ let saveTimer = null;
 let remoteReloadTimer = null;
 let realtimeChannel = null;
 let remotePollTimer = null;
+let salesInactivityTimer = null;
 sessionStorage.removeItem("profitUnlocked");
 
 const supabaseClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -627,7 +629,7 @@ function invoiceHtml(invoiceId) {
     </div>
     <div class="invoice-parties">
       <div><strong>Bill to</strong><br>${customer?.name || "-"}<br>${customer?.phone || ""}<br>${customer?.email || ""}<br>${customer?.address || ""}</div>
-      <div><strong>Vehicle</strong><br>${vehicle ? `${vehicle.plate} - ${vehicle.model}` : "-"}<br>${vehicle ? `${Number(vehicle.mileage).toLocaleString()} mi` : ""}</div>
+      <div><strong>Vehicle</strong><br>${vehicle ? `${vehicle.plate} - ${vehicle.model}` : "-"}</div>
     </div>
     <table>
       ${invoiceHead}
@@ -719,6 +721,42 @@ function setLoginMessage(message) {
 function showAuthenticatedApp(show) {
   loginScreen.classList.toggle("hidden", show);
   appShell.classList.toggle("auth-locked", !show);
+}
+
+function stopSalesInactivityTimer() {
+  window.clearTimeout(salesInactivityTimer);
+  salesInactivityTimer = null;
+}
+
+function resetSalesInactivityTimer() {
+  if (!currentUser || isAdmin()) {
+    stopSalesInactivityTimer();
+    return;
+  }
+  window.clearTimeout(salesInactivityTimer);
+  salesInactivityTimer = window.setTimeout(() => {
+    signOutUser("Signed out after 10 minutes of inactivity.", "auto logout");
+  }, SALES_INACTIVITY_MS);
+}
+
+async function signOutUser(message = "Signed out.", action = "logout") {
+  const signedOutUser = currentUser;
+  stopSalesInactivityTimer();
+  await recordLoginAction(action, signedOutUser);
+  stopSalesInactivityTimer();
+  currentUser = null;
+  currentProfile = null;
+  loginLogs = [];
+  remoteReady = false;
+  profitUnlocked = false;
+  stopLiveSync();
+  showAuthenticatedApp(false);
+  setLoginMessage(message);
+  window.clearTimeout(saveTimer);
+  if (supabaseClient) {
+    const { error } = await supabaseClient.auth.signOut();
+    if (error) setLoginMessage(`${message} Supabase said: ${error.message}`);
+  }
 }
 
 function queueRemoteSave() {
@@ -877,6 +915,7 @@ async function handleSignedIn(user) {
   renderQuoteBuilder();
   applyRoleAccess();
   startLiveSync();
+  resetSalesInactivityTimer();
   showAuthenticatedApp(true);
   setLoginMessage("");
 }
@@ -950,21 +989,11 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
 });
 
 document.querySelector("#logoutBtn").addEventListener("click", async () => {
-  const signedOutUser = currentUser;
-  await recordLoginAction("logout", signedOutUser);
-  currentUser = null;
-  currentProfile = null;
-  loginLogs = [];
-  remoteReady = false;
-  profitUnlocked = false;
-  stopLiveSync();
-  showAuthenticatedApp(false);
-  setLoginMessage("Signed out.");
-  window.clearTimeout(saveTimer);
-  if (supabaseClient) {
-    const { error } = await supabaseClient.auth.signOut();
-    if (error) setLoginMessage(`Signed out locally. Supabase said: ${error.message}`);
-  }
+  await signOutUser();
+});
+
+["click", "keydown", "scroll", "mousemove", "touchstart"].forEach((eventName) => {
+  window.addEventListener(eventName, resetSalesInactivityTimer, { passive: true });
 });
 
 document.querySelector("#newJobBtn").addEventListener("click", openNewQuoteDialog);
