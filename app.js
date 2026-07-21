@@ -1092,7 +1092,7 @@ function addQuoteItem(type, nameSelector, qtySelector, priceSelector, statusSele
   const name = type === "labour" ? "Labour" : nameInput.value.trim();
   const qty = Number(qtyInput.value || 1);
   const unitPrice = Number(priceInput.value || 0);
-  if (!name || qty <= 0) return;
+  if (!name || qty <= 0 || unitPrice < 0) return;
   activeQuoteItems.push({ type, name, qty, unitPrice, status: type === "part" ? statusInput?.value || "Needed" : "" });
   if (nameInput) nameInput.value = "";
   qtyInput.value = 1;
@@ -1106,6 +1106,10 @@ document.querySelector("#addPartBtn").addEventListener("click", () => addQuoteIt
 
 document.querySelector("#jobForm").addEventListener("submit", (event) => {
   event.preventDefault();
+  if (!activeQuoteItems.length) {
+    window.alert("Add at least one labour or part line before saving the quote.");
+    return;
+  }
   const form = new FormData(event.currentTarget);
   let vehicleId = form.get("vehicle");
   const existingJob = activeEditJobId ? byId("jobs", activeEditJobId) : null;
@@ -1280,7 +1284,7 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  const editJobId = event.target.dataset.jobEdit;
+  const editJobId = event.target.closest("[data-job-edit]")?.dataset.jobEdit;
   if (editJobId) {
     openEditQuoteDialog(editJobId);
     return;
