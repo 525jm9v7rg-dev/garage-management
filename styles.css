@@ -563,10 +563,18 @@ tr:last-child td {
 
 dialog {
   width: min(560px, calc(100vw - 28px));
+  max-width: calc(100vw - 28px);
+  max-height: calc(100vh - 28px);
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 0;
   border-radius: 8px;
   padding: 0;
   box-shadow: 0 28px 80px rgba(15, 23, 42, 0.3);
+}
+
+#jobDialog {
+  width: min(920px, calc(100vw - 28px));
 }
 
 dialog::backdrop {
@@ -579,6 +587,8 @@ dialog::backdrop {
 
 .dialog-form {
   padding: 22px;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .mode-switch {
@@ -605,6 +615,7 @@ dialog::backdrop {
 }
 
 .field-group {
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 14px;
@@ -624,14 +635,14 @@ dialog::backdrop {
 
 .quote-row {
   display: grid;
-  grid-template-columns: 120px 130px auto;
+  grid-template-columns: minmax(0, 120px) minmax(0, 130px) auto;
   gap: 10px;
   align-items: end;
   margin-bottom: 10px;
 }
 
 .quote-row:nth-of-type(2) {
-  grid-template-columns: minmax(180px, 1fr) 90px 130px 140px auto;
+  grid-template-columns: minmax(180px, 1fr) minmax(0, 90px) minmax(0, 130px) minmax(0, 140px) auto;
 }
 
 .quote-items {
@@ -642,7 +653,7 @@ dialog::backdrop {
 
 .quote-line {
   display: grid;
-  grid-template-columns: 1fr minmax(120px, auto) auto auto;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, auto) auto auto;
   gap: 10px;
   align-items: center;
   padding: 9px 0;
@@ -805,6 +816,15 @@ dialog::backdrop {
   .two-column {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .quote-line {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .quote-line > select,
+  .quote-line > button {
+    width: 100%;
   }
 
   #globalSearch {
