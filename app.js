@@ -286,6 +286,7 @@ function statusTone(status) {
 
 function renderDashboard() {
   const openJobs = state.jobs.filter((job) => job.status !== "Collected");
+  const workshopQueue = state.jobs.filter((job) => job.status === "In progress");
   const dueToday = state.jobs.filter((job) => job.due === today && job.status !== "Collected");
   const unpaid = state.invoices.filter((invoice) => invoice.status === "Unpaid");
 
@@ -293,9 +294,9 @@ function renderDashboard() {
   document.querySelector("#dueTodayCount").textContent = dueToday.length;
   document.querySelector("#unpaidInvoicesCount").textContent = unpaid.length;
 
-  document.querySelector("#queueList").innerHTML = openJobs.length
-    ? openJobs.slice(0, 5).map((job) => `<div class="list-item"><div><strong>${quoteTitle(job)}</strong><div class="muted">${vehicleLabel(job.vehicle)} - job date ${formatDate(job.due)} - ${job.mechanic || "Unassigned"}</div></div>${statusBadge(job.status)}</div>`).join("")
-    : `<div class="empty">No open quotes.</div>`;
+  document.querySelector("#queueList").innerHTML = workshopQueue.length
+    ? workshopQueue.slice(0, 5).map((job) => `<div class="list-item"><div><strong>${quoteTitle(job)}</strong><div class="muted">${vehicleLabel(job.vehicle)} - job date ${formatDate(job.due)} - ${job.mechanic || "Unassigned"}</div></div>${statusBadge(job.status)}</div>`).join("")
+    : `<div class="empty">No jobs currently in progress.</div>`;
 }
 
 function renderJobs() {
