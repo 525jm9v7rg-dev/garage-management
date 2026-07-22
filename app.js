@@ -299,6 +299,10 @@ function renderJobs() {
     return statusMatches && searchMatches;
   });
 
+  if (currentJobFilter === "Collected") {
+    filtered.sort((firstJob, secondJob) => Number(isJobPaid(firstJob)) - Number(isJobPaid(secondJob)));
+  }
+
   document.querySelector("#jobsGrid").innerHTML = filtered.length
     ? filtered.map((job) => {
       const invoice = invoiceForJob(job.id);
