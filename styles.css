@@ -561,6 +561,21 @@ tr:last-child td {
   font-weight: 800;
 }
 
+.payment-button {
+  color: #fff;
+  font-weight: 800;
+}
+
+.payment-outstanding {
+  border-color: #dc2626;
+  background: #dc2626;
+}
+
+.payment-recorded {
+  border-color: #16a34a;
+  background: #16a34a;
+}
+
 dialog {
   width: min(560px, calc(100vw - 28px));
   max-width: calc(100vw - 28px);
@@ -743,6 +758,13 @@ dialog::backdrop {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 16px;
+}
+
+.invoice-bank-details {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  line-height: 1.55;
 }
 
 .profit-grid {

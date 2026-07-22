@@ -11,7 +11,12 @@ const business = {
   name: "OG Automotives Limited",
   vatName: "OG Autos Services",
   address: "Unit 1 Foxhall Road, CM0 7LB",
-  vatNumber: "519417090"
+  vatNumber: "519417090",
+  bankName: "OG Automotives LTD",
+  accountNumber: "30152887",
+  vatBankName: "OG Autos Services Ltd",
+  vatAccountNumber: "30184819",
+  sortCode: "52-30-02"
 };
 const VAT_RATE = 0.2;
 const PROFIT_PASSWORD = "240710";
@@ -295,7 +300,15 @@ function renderJobs() {
   });
 
   document.querySelector("#jobsGrid").innerHTML = filtered.length
-    ? filtered.map((job) => `
+    ? filtered.map((job) => {
+      const invoice = invoiceForJob(job.id);
+      const collectedInvoiceAction = job.status === "Collected" && invoice
+        ? `<button class="small-button payment-button ${invoice.status === "Paid" ? "payment-recorded" : "payment-outstanding"}" type="button" data-invoice-toggle="${invoice.id}">${invoice.status === "Paid" ? "Paid" : "Not Paid"}</button>`
+        : "";
+      const editQuoteAction = job.status === "Collected"
+        ? ""
+        : `<button class="small-button" type="button" data-job-edit="${job.id}">Edit quote</button>`;
+      return `
         <article class="job-card ${statusTone(job.status)}">
           <div class="job-card-header">
             <div>
@@ -314,7 +327,8 @@ function renderJobs() {
             <span class="job-note">${job.notes || "No notes"}</span>
           </div>
           <div class="row-actions">
-            <button class="small-button" type="button" data-job-edit="${job.id}">Edit quote</button>
+            ${editQuoteAction}
+            ${collectedInvoiceAction}
             <button class="small-button danger-button" type="button" data-job-delete="${job.id}">Delete job</button>
           </div>
           <label>Mechanic
@@ -328,7 +342,8 @@ function renderJobs() {
             </select>
           </label>
         </article>
-      `).join("")
+      `;
+    }).join("")
     : `<div class="empty">No quotes match this view.</div>`;
 }
 
@@ -431,7 +446,7 @@ function renderInvoices() {
       const job = byId("jobs", invoice.job);
       const customer = customerForJob(job);
       const vatButton = customer?.vatCustomer ? `<button class="small-button" data-invoice-vat="${invoice.id}">${invoice.vatEnabled ? "VAT off" : "VAT on"}</button>` : "";
-      return `<tr><td><strong>${invoice.id.toUpperCase()}</strong></td><td>${job ? quoteTitle(job) : "Quote removed"}</td><td>${job ? vehicleLabel(job.vehicle) : "-"}</td><td>${money(invoiceTotal(invoice))}</td><td>${formatDate(invoice.due)}</td><td>${customer?.vatCustomer ? invoice.vatEnabled ? "VAT invoice" : "VAT available" : "No VAT"}</td><td>${statusBadge(invoice.status)}</td><td><div class="row-actions"><button class="small-button" data-invoice-view="${invoice.id}">View</button><button class="small-button" data-invoice-print="${invoice.id}">Print</button><button class="small-button" data-invoice-email="${invoice.id}">Email</button>${vatButton}<button class="small-button" data-invoice-toggle="${invoice.id}">${invoice.status === "Paid" ? "Mark unpaid" : "Mark paid"}</button></div></td></tr>`;
+      return `<tr><td><strong>${invoice.id.toUpperCase()}</strong></td><td>${job ? quoteTitle(job) : "Quote removed"}</td><td>${job ? vehicleLabel(job.vehicle) : "-"}</td><td>${money(invoiceTotal(invoice))}</td><td>${formatDate(invoice.due)}</td><td>${customer?.vatCustomer ? invoice.vatEnabled ? "VAT invoice" : "VAT available" : "No VAT"}</td><td>${statusBadge(invoice.status)}</td><td><div class="row-actions"><button class="small-button" data-invoice-view="${invoice.id}">View</button><button class="small-button" data-invoice-print="${invoice.id}">Print</button><button class="small-button" data-invoice-email="${invoice.id}">Email</button>${vatButton}<button class="small-button payment-button ${invoice.status === "Paid" ? "payment-recorded" : "payment-outstanding"}" data-invoice-toggle="${invoice.id}">${invoice.status === "Paid" ? "Paid" : "Not Paid"}</button></div></td></tr>`;
     })
     .join("");
 
@@ -681,6 +696,12 @@ function invoiceHtml(invoiceId) {
         <tr><th colspan="${totalColspan}">Grand total</th><th>${money(invoiceTotal(invoice))}</th></tr>
       </tfoot>
     </table>
+    <div class="invoice-bank-details">
+      <strong>Bank Details</strong><br>
+      ${vatEnabled ? business.vatBankName : business.bankName}<br>
+      ${vatEnabled ? business.vatAccountNumber : business.accountNumber}<br>
+      ${business.sortCode}
+    </div>
   `;
 }
 
