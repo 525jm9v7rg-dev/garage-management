@@ -156,7 +156,13 @@ function normalizeState() {
   state.invoices.forEach((invoice) => {
     const job = byId("jobs", invoice.job);
     invoice.vatEnabled = Boolean(invoice.vatEnabled && customerForJob(job)?.vatCustomer);
-    if (job) invoice.amount = invoiceTotal(invoice);
+    if (job) {
+      if (job.readyDate === undefined) {
+        job.readyDate = ["Ready", "Collected"].includes(job.status) ? invoice.due || job.due || "" : "";
+      }
+      invoice.due = job.readyDate || "";
+      invoice.amount = invoiceTotal(invoice);
+    }
   });
   save();
 }
@@ -1138,6 +1144,7 @@ document.querySelector("#jobForm").addEventListener("submit", (event) => {
   const form = new FormData(event.currentTarget);
   let vehicleId = form.get("vehicle");
   const existingJob = activeEditJobId ? byId("jobs", activeEditJobId) : null;
+  const previousStatus = existingJob?.status || "";
 
   if (form.get("vehicleMode") === "new") {
     let customerId = form.get("newVehicleCustomer");
@@ -1166,17 +1173,20 @@ document.querySelector("#jobForm").addEventListener("submit", (event) => {
     status: form.get("status"),
     notes: form.get("notes")
   });
+  if (job.status === "Ready" && previousStatus !== "Ready") job.readyDate = dateKey(new Date());
+  if (job.status === "Collected" && !job.readyDate) job.readyDate = dateKey(new Date());
+  if (job.readyDate === undefined) job.readyDate = "";
 
   if (activeEditJobId) {
     const invoice = state.invoices.find((item) => item.job === job.id);
     if (invoice) {
       invoice.vatEnabled = Boolean(customerForJob(job)?.vatCustomer);
       invoice.amount = invoiceTotal(invoice);
-      invoice.due = job.due;
+      invoice.due = job.readyDate || "";
     }
   } else {
     state.jobs.unshift(job);
-    const invoice = { id: makeId("i"), job: job.id, amount: 0, status: "Unpaid", due: job.due, vatEnabled: Boolean(customerForJob(job)?.vatCustomer) };
+    const invoice = { id: makeId("i"), job: job.id, amount: 0, status: "Unpaid", due: job.readyDate || "", vatEnabled: Boolean(customerForJob(job)?.vatCustomer) };
     invoice.amount = invoiceTotal(invoice);
     state.invoices.unshift(invoice);
   }
@@ -1260,7 +1270,13 @@ document.addEventListener("change", (event) => {
     return;
   }
   if (jobId) {
-    byId("jobs", jobId).status = event.target.value;
+    const job = byId("jobs", jobId);
+    const nextStatus = event.target.value;
+    if (nextStatus === "Ready" && job.status !== "Ready") job.readyDate = dateKey(new Date());
+    if (nextStatus === "Collected" && !job.readyDate) job.readyDate = dateKey(new Date());
+    job.status = nextStatus;
+    const invoice = invoiceForJob(job.id);
+    if (invoice) invoice.due = job.readyDate || "";
     save();
     render();
   }
