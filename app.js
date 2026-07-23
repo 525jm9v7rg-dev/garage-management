@@ -96,7 +96,7 @@ const expensesTotal = () => state.expenses.reduce((total, expense) => total + Nu
 const invoiceForJob = (jobId) => state.invoices.find((invoice) => invoice.job === jobId);
 const isJobPaid = (job) => invoiceForJob(job.id)?.status === "Paid";
 const paidLabourIncome = () => state.jobs.reduce((total, job) => total + (isJobPaid(job) ? jobLabourTotal(job) : 0), 0);
-const profit = () => paidLabourIncome();
+const profit = () => paidLabourIncome() - expensesTotal();
 
 function customerForJob(job) {
   const vehicle = job ? byId("vehicles", job.vehicle) : null;
@@ -497,12 +497,12 @@ function renderProfit() {
       <div class="profit-box"><span>Total labour quoted</span><strong>${money(allLabourIncome())}</strong></div>
       <div class="profit-box"><span>Parts</span><strong>${money(allPartsCost())}</strong></div>
       <div class="profit-box"><span>Expenses</span><strong>${money(expensesTotal())}</strong></div>
-      <div class="profit-box"><span>Profit</span><strong>${money(profit())}</strong></div>
+      <div class="profit-box"><span>Net profit</span><strong>${money(profit())}</strong></div>
     </div>
     <h2>Expenses</h2>
     <table><thead><tr><th>Type</th><th>Mechanic</th><th>Description</th><th>Amount</th><th></th></tr></thead><tbody>${expenseRows || `<tr><td colspan="5">No expenses yet.</td></tr>`}</tbody></table>
     <h2>Quotes</h2>
-    <table><thead><tr><th>Quote</th><th>Vehicle</th><th>Payment</th><th>Labour</th><th>Parts</th><th>Profit counted</th></tr></thead><tbody>${jobRows || `<tr><td colspan="6">No quotes yet.</td></tr>`}</tbody></table>
+    <table><thead><tr><th>Quote</th><th>Vehicle</th><th>Payment</th><th>Labour</th><th>Parts</th><th>Paid labour counted</th></tr></thead><tbody>${jobRows || `<tr><td colspan="6">No quotes yet.</td></tr>`}</tbody></table>
   `;
 }
 
