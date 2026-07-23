@@ -91,11 +91,11 @@ const partsTotal = (items = []) => items.filter((item) => itemType(item) === "pa
 const jobLabourTotal = (job) => labourItemsTotal(job?.lineItems || []);
 const jobTotal = (job) => jobLabourTotal(job) + partsTotal(job?.lineItems || []);
 const allLabourIncome = () => state.jobs.reduce((total, job) => total + jobLabourTotal(job), 0);
-const allPartsCost = () => state.jobs.reduce((total, job) => total + partsTotal(job.lineItems || []), 0);
 const expensesTotal = () => state.expenses.reduce((total, expense) => total + Number(expense.amount || 0), 0);
 const invoiceForJob = (jobId) => state.invoices.find((invoice) => invoice.job === jobId);
 const isJobPaid = (job) => invoiceForJob(job.id)?.status === "Paid";
 const paidLabourIncome = () => state.jobs.reduce((total, job) => total + (isJobPaid(job) ? jobLabourTotal(job) : 0), 0);
+const paidPartsIncome = () => state.jobs.reduce((total, job) => total + (isJobPaid(job) ? partsTotal(job.lineItems || []) : 0), 0);
 const profit = () => paidLabourIncome() - expensesTotal();
 
 function customerForJob(job) {
@@ -495,7 +495,7 @@ function renderProfit() {
     <div class="profit-grid">
       <div class="profit-box"><span>Paid labour</span><strong>${money(paidLabourIncome())}</strong></div>
       <div class="profit-box"><span>Total labour quoted</span><strong>${money(allLabourIncome())}</strong></div>
-      <div class="profit-box"><span>Parts</span><strong>${money(allPartsCost())}</strong></div>
+      <div class="profit-box"><span>Paid invoice parts</span><strong>${money(paidPartsIncome())}</strong></div>
       <div class="profit-box"><span>Expenses</span><strong>${money(expensesTotal())}</strong></div>
       <div class="profit-box"><span>Net profit</span><strong>${money(profit())}</strong></div>
     </div>
