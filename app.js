@@ -50,6 +50,7 @@ let currentProfile = null;
 let loginLogs = [];
 let remoteReady = false;
 let syncingRemote = false;
+let remoteSavePending = false;
 let saveTimer = null;
 let remoteReloadTimer = null;
 let realtimeChannel = null;
@@ -821,11 +822,13 @@ async function signOutUser(message = "Signed out.", action = "logout") {
   currentProfile = null;
   loginLogs = [];
   remoteReady = false;
+  remoteSavePending = false;
   profitUnlocked = false;
   stopLiveSync();
   showAuthenticatedApp(false);
   setLoginMessage(message);
   window.clearTimeout(saveTimer);
+  saveTimer = null;
   if (supabaseClient) {
     const { error } = await supabaseClient.auth.signOut();
     if (error) setLoginMessage(`${message} Supabase said: ${error.message}`);
@@ -833,13 +836,16 @@ async function signOutUser(message = "Signed out.", action = "logout") {
 }
 
 function queueRemoteSave() {
-  if (!remoteReady || syncingRemote || !supabaseClient) return;
+  if (!remoteReady || !supabaseClient) return;
+  remoteSavePending = true;
+  if (syncingRemote) return;
   window.clearTimeout(saveTimer);
   saveTimer = window.setTimeout(() => {
+    saveTimer = null;
     saveStateToSupabase().catch((error) => {
       console.error("Supabase save failed", error);
     });
-  }, 400);
+  }, 100);
 }
 
 async function loadTableRows(table) {
@@ -887,13 +893,22 @@ async function saveTableRows(table) {
 
 async function saveStateToSupabase() {
   if (!remoteReady || !supabaseClient) return;
+  if (syncingRemote) {
+    remoteSavePending = true;
+    return;
+  }
+  remoteSavePending = false;
   syncingRemote = true;
   try {
     for (const table of DATA_TABLES) {
       await saveTableRows(table);
     }
+    if (realtimeChannel) {
+      await realtimeChannel.send({ type: "broadcast", event: "state-changed", payload: { updatedAt: new Date().toISOString() } });
+    }
   } finally {
     syncingRemote = false;
+    if (remoteSavePending) queueRemoteSave();
   }
 }
 
@@ -901,7 +916,8 @@ function queueRemoteReload() {
   if (!currentUser || !remoteReady || !supabaseClient) return;
   window.clearTimeout(remoteReloadTimer);
   remoteReloadTimer = window.setTimeout(async () => {
-    if (syncingRemote) {
+    remoteReloadTimer = null;
+    if (syncingRemote || remoteSavePending || saveTimer) {
       queueRemoteReload();
       return;
     }
@@ -912,18 +928,19 @@ function queueRemoteReload() {
     } catch (error) {
       console.error("Supabase live reload failed", error);
     }
-  }, 800);
+  }, 150);
 }
 
 function startLiveSync() {
   if (!supabaseClient || realtimeChannel) return;
   let channel = supabaseClient.channel("workshop-live-sync");
+  channel = channel.on("broadcast", { event: "state-changed" }, queueRemoteReload);
   DATA_TABLES.forEach((table) => {
     channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, queueRemoteReload);
   });
   realtimeChannel = channel.subscribe();
   window.clearInterval(remotePollTimer);
-  remotePollTimer = window.setInterval(queueRemoteReload, 15000);
+  remotePollTimer = window.setInterval(queueRemoteReload, 3000);
 }
 
 function stopLiveSync() {
