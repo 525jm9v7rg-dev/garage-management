@@ -480,7 +480,7 @@ function renderCustomers() {
     .map((customer) => {
       const vehicles = customerVehicles(customer.id);
       const vehicleList = vehicles.length ? vehicles.map((vehicle) => `<div><strong>${vehicle.model}</strong><br><span class="muted">${vehicle.plate} - ${Number(vehicle.mileage || 0).toLocaleString()} mi - MOT ${formatDate(vehicle.motDue)}</span></div>`).join("") : "-";
-      return `<tr><td><strong>${customer.name}</strong><br><span class="muted">${customer.phone}<br>${customer.email || "-"}<br>${customer.address || "No address saved"}<br>${customer.vatCustomer ? "VAT customer" : "No VAT"}</span><br><div class="row-actions"><button class="small-button" data-customer-edit="${customer.id}">Edit</button><button class="small-button" data-customer-vat="${customer.id}">${customer.vatCustomer ? "Remove VAT" : "Mark VAT"}</button></div></td><td>${vehicleList}</td></tr>`;
+      return `<tr><td><strong>${customer.name}</strong><br><span class="muted">${customer.phone}<br>${customer.email || "-"}<br>${customer.address || "No address saved"}<br>${customer.vatCustomer ? "VAT customer" : "No VAT"}</span><br><div class="row-actions"><button class="small-button" data-customer-edit="${customer.id}">Edit</button><button class="small-button" data-customer-vat="${customer.id}">${customer.vatCustomer ? "Remove VAT" : "Mark VAT"}</button><button class="small-button danger-button" data-customer-delete="${customer.id}">Delete</button></div></td><td>${vehicleList}</td></tr>`;
     })
     .join("");
 
@@ -1457,6 +1457,25 @@ document.addEventListener("click", (event) => {
   const customerEditId = event.target.dataset.customerEdit;
   if (customerEditId) {
     editCustomer(customerEditId);
+    return;
+  }
+
+  const customerDeleteId = event.target.closest("[data-customer-delete]")?.dataset.customerDelete;
+  if (customerDeleteId) {
+    const customer = byId("customers", customerDeleteId);
+    if (!customer) return;
+    const vehicleIds = new Set(state.vehicles.filter((vehicle) => vehicle.owner === customer.id).map((vehicle) => vehicle.id));
+    const jobIds = new Set(state.jobs.filter((job) => vehicleIds.has(job.vehicle)).map((job) => job.id));
+    const invoiceCount = state.invoices.filter((invoice) => jobIds.has(invoice.job)).length;
+    const confirmed = window.confirm(`Delete ${customer.name}? This will also delete ${vehicleIds.size} vehicle(s), ${jobIds.size} job(s), and ${invoiceCount} invoice(s). This cannot be undone.`);
+    if (!confirmed) return;
+    state.customers = state.customers.filter((item) => item.id !== customer.id);
+    state.vehicles = state.vehicles.filter((vehicle) => !vehicleIds.has(vehicle.id));
+    state.jobs = state.jobs.filter((job) => !jobIds.has(job.id));
+    state.invoices = state.invoices.filter((invoice) => !jobIds.has(invoice.job));
+    if (document.querySelector('#customerForm [name="customerId"]').value === customer.id) resetCustomerForm();
+    save();
+    render();
     return;
   }
 
