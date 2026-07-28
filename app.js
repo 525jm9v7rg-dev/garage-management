@@ -265,6 +265,7 @@ function setView(viewId) {
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === viewId));
   pageTitle.textContent = viewId === "jobs" ? "Quotes" : viewId === "userLogs" ? "User Logs" : viewId[0].toUpperCase() + viewId.slice(1);
   render();
+  if (viewId === "userLogs") refreshAdminLogs();
 }
 
 function unlockProfitSection() {
@@ -935,12 +936,16 @@ function startLiveSync() {
   if (!supabaseClient || realtimeChannel) return;
   let channel = supabaseClient.channel("workshop-live-sync");
   channel = channel.on("broadcast", { event: "state-changed" }, queueRemoteReload);
+  channel = channel.on("postgres_changes", { event: "INSERT", schema: "public", table: "login_logs" }, refreshAdminLogs);
   DATA_TABLES.forEach((table) => {
     channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, queueRemoteReload);
   });
   realtimeChannel = channel.subscribe();
   window.clearInterval(remotePollTimer);
-  remotePollTimer = window.setInterval(queueRemoteReload, 3000);
+  remotePollTimer = window.setInterval(() => {
+    queueRemoteReload();
+    refreshAdminLogs();
+  }, 3000);
 }
 
 function stopLiveSync() {
@@ -969,8 +974,10 @@ async function loadCurrentProfile(user) {
 }
 
 async function loadLoginLogs() {
-  loginLogs = [];
-  if (!isAdmin()) return;
+  if (!isAdmin()) {
+    loginLogs = [];
+    return;
+  }
   const { data, error } = await supabaseClient
     .from("login_logs")
     .select("user_email,action,created_at")
@@ -981,6 +988,12 @@ async function loadLoginLogs() {
     return;
   }
   loginLogs = data || [];
+}
+
+async function refreshAdminLogs() {
+  if (!currentUser || !isAdmin() || !supabaseClient) return;
+  await loadLoginLogs();
+  renderUserLogs();
 }
 
 async function recordLoginAction(action, user = currentUser) {
