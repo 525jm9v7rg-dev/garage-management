@@ -245,6 +245,7 @@
         </fieldset>
         <div class="form-grid">
           <label>Assigned mechanic<select name="mechanic"></select></label>
+          <label>Estimated job hours<input required name="estimatedHours" type="number" min="0.5" max="8" step="0.5" value="1" /></label>
           <label>Status<select name="status">
             <option>Booked</option>
             <option>In progress</option>
@@ -252,6 +253,8 @@
             <option>Collected</option>
           </select></label>
         </div>
+        <label class="availability-from">Find availability from<input id="availabilityFrom" type="date" /></label>
+        <div id="mechanicAvailability" class="mechanic-availability" aria-live="polite"></div>
         <label>Notes<textarea name="notes" placeholder="Customer concerns, diagnostics, parts needed..."></textarea></label>
         <button id="saveJobBtn" class="primary-button" type="submit">Create quote</button>
       </form>

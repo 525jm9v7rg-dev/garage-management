@@ -685,6 +685,48 @@ dialog::backdrop {
   font-weight: 800;
 }
 
+.mechanic-availability {
+  margin: 4px 0 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.availability-from {
+  max-width: 280px;
+}
+
+.availability-days {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.availability-day {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: var(--accent-dark);
+  text-align: left;
+  cursor: pointer;
+}
+
+.availability-day:hover {
+  border-color: var(--accent);
+  background: #dbeafe;
+}
+
+.availability-day span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -869,6 +911,10 @@ dialog::backdrop {
   }
 
   .stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .availability-days {
     grid-template-columns: 1fr;
   }
 

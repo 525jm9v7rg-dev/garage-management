@@ -25,7 +25,9 @@ const STORAGE_KEY = "garageDeskStateFirstUse";
 const SUPABASE_URL = "https://jlnfsafgonfuzuetgmhj.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpsbmZzYWZnb25mdXp1ZXRnbWhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5MzQ4MzcsImV4cCI6MjA5OTUxMDgzN30.Nwg6AfGPGGiofZjO4BLubjRsx6QqRSgEiBwvZ-LKjCQ";
 const DATA_TABLES = ["customers", "vehicles", "jobs", "invoices", "expenses"];
-const DEFAULT_MECHANICS = ["DOM"];
+const DEFAULT_MECHANICS = ["Dom", "Steve", "Jay", "Callum", "Jack"];
+const MECHANIC_DAILY_HOURS = 8;
+const MECHANIC_WEEKLY_HOURS = 40;
 
 const seedData = {
   customers: [],
@@ -153,6 +155,10 @@ function normalizeState() {
     }
     if (!job.type) job.type = quoteTitle(job);
     if (!job.mechanic) job.mechanic = "Unassigned";
+    if (String(job.mechanic).toLowerCase() === "dom") job.mechanic = "Dom";
+    if (!Number(job.estimatedHours)) {
+      job.estimatedHours = Math.min(MECHANIC_DAILY_HOURS, Math.max(1, job.lineItems.filter((item) => itemType(item) === "labour").reduce((total, item) => total + Number(item.qty || 0), 0)));
+    }
   });
   state.invoices.forEach((invoice) => {
     const job = byId("jobs", invoice.job);
@@ -197,14 +203,83 @@ function customerVehicles(customerId) {
 }
 
 function mechanicOptions() {
+  const canonicalMechanicName = (name) => DEFAULT_MECHANICS.find((mechanic) => mechanic.toLowerCase() === String(name).trim().toLowerCase()) || String(name).trim();
   const expenseNames = state.expenses
     .filter((expense) => expense.type === "mechanic" && expense.mechanicName)
-    .map((expense) => expense.mechanicName.trim())
+    .map((expense) => canonicalMechanicName(expense.mechanicName))
     .filter(Boolean);
   const assignedNames = state.jobs
-    .map((job) => job.mechanic)
+    .map((job) => canonicalMechanicName(job.mechanic))
     .filter((name) => name && name !== "Unassigned");
   return ["Unassigned", ...new Set([...DEFAULT_MECHANICS, ...expenseNames, ...assignedNames])];
+}
+
+function dateFromKey(value) {
+  return new Date(`${value}T12:00:00`);
+}
+
+function weekStartKey(value) {
+  const date = dateFromKey(value);
+  const offset = (date.getDay() + 6) % 7;
+  date.setDate(date.getDate() - offset);
+  return dateKey(date);
+}
+
+function jobEstimatedHours(job) {
+  return Number(job?.estimatedHours || 0);
+}
+
+function scheduledJobsForMechanic(mechanic, excludeJobId = null) {
+  return state.jobs.filter((job) => job.id !== excludeJobId
+    && job.mechanic === mechanic
+    && ["Booked", "In progress"].includes(job.status));
+}
+
+function mechanicCapacity(mechanic, day, excludeJobId = null) {
+  const scheduled = scheduledJobsForMechanic(mechanic, excludeJobId);
+  const dayHours = scheduled.filter((job) => job.due === day).reduce((total, job) => total + jobEstimatedHours(job), 0);
+  const week = weekStartKey(day);
+  const weekHours = scheduled.filter((job) => weekStartKey(job.due) === week).reduce((total, job) => total + jobEstimatedHours(job), 0);
+  return {
+    available: Math.max(0, Math.min(MECHANIC_DAILY_HOURS - dayHours, MECHANIC_WEEKLY_HOURS - weekHours)),
+    dayHours,
+    weekHours
+  };
+}
+
+function nextMechanicDates(mechanic, hours, excludeJobId = null, startDate = dateKey(new Date())) {
+  if (!mechanic || mechanic === "Unassigned" || hours <= 0 || hours > MECHANIC_DAILY_HOURS) return [];
+  const results = [];
+  const date = dateFromKey(startDate);
+  for (let checked = 0; checked < 120 && results.length < 3; checked += 1) {
+    const day = dateKey(date);
+    if (![0, 6].includes(date.getDay())) {
+      const capacity = mechanicCapacity(mechanic, day, excludeJobId);
+      if (capacity.available >= hours) results.push({ day, ...capacity });
+    }
+    date.setDate(date.getDate() + 1);
+  }
+  return results;
+}
+
+function renderMechanicAvailability() {
+  const panel = document.querySelector("#mechanicAvailability");
+  if (!panel) return;
+  const mechanic = document.querySelector('#jobForm select[name="mechanic"]').value;
+  const hours = Number(document.querySelector('#jobForm input[name="estimatedHours"]').value || 0);
+  const availabilityFrom = document.querySelector("#availabilityFrom").value || dateKey(new Date());
+  if (mechanic === "Unassigned") {
+    panel.innerHTML = `<span class="muted">Choose a mechanic to see availability.</span>`;
+    return;
+  }
+  if (!hours || hours > MECHANIC_DAILY_HOURS) {
+    panel.innerHTML = `<span class="muted">Enter between 0.5 and ${MECHANIC_DAILY_HOURS} hours to see available days.</span>`;
+    return;
+  }
+  const dates = nextMechanicDates(mechanic, hours, activeEditJobId, availabilityFrom);
+  panel.innerHTML = dates.length
+    ? `<strong>Next 3 available days for ${mechanic}</strong><div class="availability-days">${dates.map((entry) => `<button class="availability-day" type="button" data-availability-date="${entry.day}"><strong>${dateFromKey(entry.day).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}</strong><span>${entry.available}h available</span></button>`).join("")}</div><small class="muted">Capacity: ${MECHANIC_DAILY_HOURS} hours per day, ${MECHANIC_WEEKLY_HOURS} hours per week.</small>`
+    : `<span class="muted">No available dates found in the next 120 days.</span>`;
 }
 
 function vehicleSummary(vehicle) {
@@ -333,6 +408,7 @@ function renderJobs() {
           <div class="job-meta">
             <span>Job date: ${formatDate(job.due)}</span>
             <span>Mechanic: ${job.mechanic || "Unassigned"}</span>
+            <span>Estimated time: ${jobEstimatedHours(job)} hours</span>
             <span>Labour: ${money(jobLabourTotal(job))}</span>
             <span>Parts: ${money(partsTotal(job.lineItems))}</span>
             <span class="parts-status">Parts status: ${partsStatusSummary(job)}</span>
@@ -610,7 +686,10 @@ function renderQuoteBuilder() {
 
 function resetQuoteForm() {
   document.querySelector("#jobForm").reset();
-  document.querySelector('#jobForm input[name="due"]').value = today;
+  const currentDate = dateKey(new Date());
+  document.querySelector('#jobForm input[name="due"]').value = currentDate;
+  document.querySelector("#availabilityFrom").min = currentDate;
+  document.querySelector("#availabilityFrom").value = currentDate;
   document.querySelector('#jobForm input[name="vehicleMode"][value="new"]').checked = true;
   document.querySelector(`#jobForm input[name="customerMode"][value="${state.customers.length ? "existing" : "new"}"]`).checked = true;
   activeQuoteItems = [];
@@ -620,6 +699,7 @@ function resetQuoteForm() {
   renderSelects();
   setVehicleMode("new");
   renderQuoteBuilder();
+  renderMechanicAvailability();
 }
 
 function openNewQuoteDialog() {
@@ -638,12 +718,17 @@ function openEditQuoteDialog(jobId) {
   document.querySelector('#jobForm input[name="vehicleMode"][value="existing"]').checked = true;
   document.querySelector('#jobForm select[name="vehicle"]').value = job.vehicle;
   document.querySelector('#jobForm input[name="due"]').value = job.due;
+  const currentDate = dateKey(new Date());
+  document.querySelector("#availabilityFrom").min = currentDate;
+  document.querySelector("#availabilityFrom").value = job.due >= currentDate ? job.due : currentDate;
   document.querySelector('#jobForm select[name="mechanic"]').value = job.mechanic || "Unassigned";
+  document.querySelector('#jobForm input[name="estimatedHours"]').value = jobEstimatedHours(job);
   document.querySelector('#jobForm select[name="status"]').value = job.status;
   document.querySelector('#jobForm textarea[name="notes"]').value = job.notes || "";
   activeQuoteItems = (job.lineItems || []).map((item) => ({ ...item }));
   setVehicleMode("existing");
   renderQuoteBuilder();
+  renderMechanicAvailability();
   jobDialog.showModal();
 }
 
@@ -1146,6 +1231,11 @@ document.querySelectorAll('#jobForm input[name="customerMode"]').forEach((radio)
   document.querySelector(`#jobForm [name="${name}"]`).addEventListener("change", renderQuoteBuilder);
 });
 
+document.querySelector('#jobForm select[name="mechanic"]').addEventListener("change", renderMechanicAvailability);
+document.querySelector('#jobForm input[name="estimatedHours"]').addEventListener("input", renderMechanicAvailability);
+document.querySelector('#jobForm input[name="due"]').addEventListener("change", renderMechanicAvailability);
+document.querySelector("#availabilityFrom").addEventListener("change", renderMechanicAvailability);
+
 function addQuoteItem(type, nameSelector, qtySelector, priceSelector, statusSelector) {
   const nameInput = nameSelector ? document.querySelector(nameSelector) : null;
   const qtyInput = document.querySelector(qtySelector);
@@ -1173,6 +1263,25 @@ document.querySelector("#jobForm").addEventListener("submit", (event) => {
     return;
   }
   const form = new FormData(event.currentTarget);
+  const mechanic = form.get("mechanic");
+  const estimatedHours = Number(form.get("estimatedHours") || 0);
+  const jobDate = form.get("due");
+  if (!mechanic || mechanic === "Unassigned") {
+    window.alert("Choose a mechanic before saving the quote.");
+    return;
+  }
+  if ([0, 6].includes(dateFromKey(jobDate).getDay())) {
+    window.alert("Choose a weekday for the job.");
+    return;
+  }
+  if (["Booked", "In progress"].includes(form.get("status"))) {
+    const capacity = mechanicCapacity(mechanic, jobDate, activeEditJobId);
+    if (capacity.available < estimatedHours) {
+      window.alert(`${mechanic} only has ${capacity.available} hours available on ${formatDate(jobDate)}. Choose one of the suggested available days.`);
+      renderMechanicAvailability();
+      return;
+    }
+  }
   let vehicleId = form.get("vehicle");
   const existingJob = activeEditJobId ? byId("jobs", activeEditJobId) : null;
   const previousStatus = existingJob?.status || "";
@@ -1200,7 +1309,8 @@ document.querySelector("#jobForm").addEventListener("submit", (event) => {
     due: form.get("due"),
     estimate: 0,
     lineItems: activeQuoteItems.map((item) => ({ ...item })),
-    mechanic: form.get("mechanic") || "Unassigned",
+    mechanic,
+    estimatedHours,
     status: form.get("status"),
     notes: form.get("notes")
   });
@@ -1303,6 +1413,14 @@ document.addEventListener("change", (event) => {
   if (jobId) {
     const job = byId("jobs", jobId);
     const nextStatus = event.target.value;
+    if (["Booked", "In progress"].includes(nextStatus)) {
+      const capacity = mechanicCapacity(job.mechanic, job.due, job.id);
+      if (!job.mechanic || job.mechanic === "Unassigned" || capacity.available < jobEstimatedHours(job)) {
+        window.alert(`${job.mechanic || "This mechanic"} does not have enough availability for this job on ${formatDate(job.due)}.`);
+        render();
+        return;
+      }
+    }
     if (nextStatus === "Ready" && job.status !== "Ready") job.readyDate = dateKey(new Date());
     if (nextStatus === "Collected" && !job.readyDate) job.readyDate = dateKey(new Date());
     job.status = nextStatus;
@@ -1312,13 +1430,30 @@ document.addEventListener("change", (event) => {
     render();
   }
   if (mechanicJobId) {
-    byId("jobs", mechanicJobId).mechanic = event.target.value;
+    const job = byId("jobs", mechanicJobId);
+    const nextMechanic = event.target.value;
+    if (["Booked", "In progress"].includes(job.status)) {
+      const capacity = mechanicCapacity(nextMechanic, job.due, job.id);
+      if (nextMechanic === "Unassigned" || capacity.available < jobEstimatedHours(job)) {
+        window.alert(`${nextMechanic} does not have ${jobEstimatedHours(job)} hours available on ${formatDate(job.due)}.`);
+        render();
+        return;
+      }
+    }
+    job.mechanic = nextMechanic;
     save();
     render();
   }
 });
 
 document.addEventListener("click", (event) => {
+  const availabilityDate = event.target.closest("[data-availability-date]")?.dataset.availabilityDate;
+  if (availabilityDate) {
+    document.querySelector('#jobForm input[name="due"]').value = availabilityDate;
+    renderMechanicAvailability();
+    return;
+  }
+
   const customerEditId = event.target.dataset.customerEdit;
   if (customerEditId) {
     editCustomer(customerEditId);
