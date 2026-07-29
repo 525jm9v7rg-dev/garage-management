@@ -617,7 +617,10 @@ function renderWorkLogUserOptions(selectedEmail = null) {
   addUser(currentUser?.email, currentUser?.id);
   const options = [...users.values()].sort((first, second) => first.email.localeCompare(second.email));
   select.innerHTML = options.length
-    ? options.map((user) => `<option value="${user.email}">${user.email}</option>`).join("")
+    ? options.map((user) => {
+      const username = user.email.includes("@") ? user.email.split("@")[0] : user.email;
+      return `<option value="${user.email}">${username}${username === user.email ? "" : ` (${user.email})`}</option>`;
+    }).join("")
     : `<option value="">No users found</option>`;
   const preferredEmail = selectedEmail || currentSelection || currentUser?.email;
   if (options.some((user) => user.email === preferredEmail)) select.value = preferredEmail;
