@@ -823,6 +823,15 @@ dialog::backdrop {
   margin-bottom: 18px;
 }
 
+.work-log-toolbar {
+  justify-content: flex-end;
+}
+
+.work-log-toolbar label {
+  width: min(220px, 100%);
+  margin: 0;
+}
+
 .profit-box {
   border: 1px solid var(--line);
   border-radius: 8px;

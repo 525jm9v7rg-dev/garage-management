@@ -149,6 +149,12 @@ function normalizeState() {
   state.jobs = Array.isArray(state.jobs) ? state.jobs : [];
   state.invoices = Array.isArray(state.invoices) ? state.invoices : [];
   state.expenses = Array.isArray(state.expenses) ? state.expenses : [];
+  state.expenses.forEach((entry) => {
+    if (entry.type !== WORK_LOG_TYPE) return;
+    if (entry.createdById === undefined) entry.createdById = entry.userId || "";
+    if (entry.createdByEmail === undefined) entry.createdByEmail = entry.userEmail || "";
+    if (entry.createdByRole === undefined) entry.createdByRole = "sales";
+  });
   state.customers.forEach((customer) => {
     if (customer.address === undefined) customer.address = "";
     if (customer.postcode === undefined) customer.postcode = "";
@@ -600,9 +606,22 @@ function renderProfit() {
   `;
 }
 
+function canManageWorkLog(entry) {
+  if (isAdmin()) return true;
+  const assignedToCurrentUser = entry.userId === currentUser?.id || entry.userEmail === currentUser?.email;
+  const createdByCurrentUser = entry.createdById === currentUser?.id || entry.createdByEmail === currentUser?.email;
+  return assignedToCurrentUser && createdByCurrentUser && entry.createdByRole !== "admin";
+}
+
 function renderWorkLogUserOptions(selectedEmail = null) {
   const select = document.querySelector('#workLogForm select[name="workLogUser"]');
   if (!select) return;
+  if (!isAdmin()) {
+    const email = currentUser?.email || "";
+    select.innerHTML = `<option value="${email}">${email}</option>`;
+    select.value = email;
+    return;
+  }
   const currentSelection = select.value;
   const users = new Map();
   const addUser = (email, userId = "") => {
@@ -630,37 +649,49 @@ function renderWorkLogs() {
   const panel = document.querySelector("#workLogsList");
   if (!panel) return;
   renderWorkLogUserOptions();
+  const monthInput = document.querySelector("#workLogMonth");
+  if (!monthInput.value) monthInput.value = dateKey(new Date()).slice(0, 7);
+  const selectedMonth = monthInput.value;
+  const monthLabel = new Date(`${selectedMonth}-01T12:00:00`).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
   const scopedLogs = workLogs()
     .filter((entry) => isAdmin() || entry.userId === currentUser?.id || entry.userEmail === currentUser?.email);
-  const visibleLogs = scopedLogs
+  const monthlyLogs = scopedLogs.filter((entry) => String(entry.workDate || "").startsWith(selectedMonth));
+  const visibleLogs = monthlyLogs
     .filter((entry) => !searchTerm || [entry.userEmail, entry.description, entry.workDate, entry.startTime, entry.endTime].join(" ").toLowerCase().includes(searchTerm))
     .sort((first, second) => `${second.workDate} ${second.startTime}`.localeCompare(`${first.workDate} ${first.startTime}`));
-  const totalHours = scopedLogs.reduce((total, entry) => total + workLogHours(entry), 0);
+  const totalHours = monthlyLogs.reduce((total, entry) => total + workLogHours(entry), 0);
   const userTotals = isAdmin()
-    ? [...scopedLogs.reduce((totals, entry) => {
+    ? [...monthlyLogs.reduce((totals, entry) => {
       const email = entry.userEmail || "Unknown user";
       totals.set(email, (totals.get(email) || 0) + workLogHours(entry));
       return totals;
     }, new Map()).entries()]
     : [];
-  const rows = visibleLogs.map((entry) => `
-    <tr>
-      ${isAdmin() ? `<td><strong>${entry.userEmail || "Unknown user"}</strong></td>` : ""}
-      <td>${formatDate(entry.workDate)}</td>
-      <td>${entry.startTime}–${entry.endTime}</td>
-      <td>${entry.description}</td>
-      <td><strong>${formatHours(workLogHours(entry))}</strong></td>
-      ${isAdmin() ? `<td><div class="row-actions"><button class="small-button" data-work-log-edit="${entry.id}">Edit</button><button class="small-button danger-button" data-work-log-delete="${entry.id}">Delete</button></div></td>` : ""}
-    </tr>
-  `).join("");
-  const columnCount = isAdmin() ? 6 : 4;
+  const rows = visibleLogs.map((entry) => {
+    const creatorLabel = entry.createdByRole === "admin" ? "Admin" : entry.createdByEmail || "Sales user";
+    const controls = canManageWorkLog(entry)
+      ? `<div class="row-actions"><button class="small-button" data-work-log-edit="${entry.id}">Edit</button><button class="small-button danger-button" data-work-log-delete="${entry.id}">Delete</button></div>`
+      : `<span class="muted">Admin managed</span>`;
+    return `
+      <tr>
+        ${isAdmin() ? `<td><strong>${entry.userEmail || "Unknown user"}</strong></td>` : ""}
+        <td>${formatDate(entry.workDate)}</td>
+        <td>${entry.startTime}–${entry.endTime}</td>
+        <td>${entry.description}</td>
+        <td><strong>${formatHours(workLogHours(entry))}</strong></td>
+        <td>${creatorLabel}</td>
+        <td>${controls}</td>
+      </tr>
+    `;
+  }).join("");
+  const columnCount = isAdmin() ? 7 : 6;
   panel.innerHTML = `
-    <h2>${isAdmin() ? "All work logs" : "My work logs"}</h2>
+    <h2>${isAdmin() ? "All work logs" : "My work logs"} — ${monthLabel}</h2>
     <div class="work-log-summary">
-      <div class="profit-box"><span>${isAdmin() ? "Total hours worked" : "Your total hours"}</span><strong>${formatHours(totalHours)}</strong></div>
+      <div class="profit-box"><span>${isAdmin() ? "Total hours worked" : "Your total hours"} — ${monthLabel}</span><strong>${formatHours(totalHours)}</strong></div>
       ${userTotals.map(([email, hours]) => `<div class="profit-box"><span>${email}</span><strong>${formatHours(hours)}</strong></div>`).join("")}
     </div>
-    <table><thead><tr>${isAdmin() ? "<th>User</th>" : ""}<th>Date</th><th>Time</th><th>Description</th><th>Hours</th>${isAdmin() ? "<th></th>" : ""}</tr></thead><tbody>${rows || `<tr><td colspan="${columnCount}">No work logged yet.</td></tr>`}</tbody></table>
+    <table><thead><tr>${isAdmin() ? "<th>User</th>" : ""}<th>Date</th><th>Time</th><th>Description</th><th>Hours</th><th>Added by</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="${columnCount}">No work logged yet.</td></tr>`}</tbody></table>
   `;
 }
 
@@ -676,9 +707,8 @@ function resetWorkLogForm() {
 }
 
 function editWorkLog(entryId) {
-  if (!isAdmin()) return;
   const entry = workLogs().find((item) => item.id === entryId);
-  if (!entry) return;
+  if (!entry || !canManageWorkLog(entry)) return;
   const form = document.querySelector("#workLogForm");
   form.elements.workLogId.value = entry.id;
   form.elements.workDate.value = entry.workDate;
@@ -1278,6 +1308,8 @@ document.querySelector("#globalSearch").addEventListener("input", (event) => {
   render();
 });
 
+document.querySelector("#workLogMonth").addEventListener("change", renderWorkLogs);
+
 document.querySelector("#expenseType").addEventListener("change", (event) => {
   document.querySelector("#mechanicNameField").classList.toggle("hidden", event.target.value !== "mechanic");
 });
@@ -1532,8 +1564,8 @@ document.querySelector("#workLogForm").addEventListener("submit", (event) => {
   const form = new FormData(event.currentTarget);
   const entryId = form.get("workLogId");
   const existingEntry = entryId ? workLogs().find((entry) => entry.id === entryId) : null;
-  if (entryId && (!isAdmin() || !existingEntry)) {
-    window.alert("Only an administrator can edit existing work logs.");
+  if (entryId && (!existingEntry || !canManageWorkLog(existingEntry))) {
+    window.alert("You cannot edit this work log.");
     resetWorkLogForm();
     return;
   }
@@ -1548,6 +1580,9 @@ document.querySelector("#workLogForm").addEventListener("submit", (event) => {
   const nextEntry = existingEntry || {
     id: makeId("wl"),
     type: WORK_LOG_TYPE,
+    createdById: currentUser.id,
+    createdByEmail: currentUser.email,
+    createdByRole: isAdmin() ? "admin" : "sales",
     createdAt: new Date().toISOString(),
     amount: 0
   };
@@ -1632,9 +1667,10 @@ document.addEventListener("click", (event) => {
   }
 
   const workLogDeleteId = event.target.closest("[data-work-log-delete]")?.dataset.workLogDelete;
-  if (workLogDeleteId && isAdmin()) {
+  if (workLogDeleteId) {
     const entry = workLogs().find((item) => item.id === workLogDeleteId);
-    if (!entry || !window.confirm(`Delete this work log for ${entry.userEmail || "this user"}?`)) return;
+    if (!entry || !canManageWorkLog(entry)) return;
+    if (!window.confirm(`Delete this work log for ${entry.userEmail || "this user"}?`)) return;
     state.expenses = state.expenses.filter((item) => item.id !== entry.id);
     if (document.querySelector('#workLogForm [name="workLogId"]').value === entry.id) resetWorkLogForm();
     save();
