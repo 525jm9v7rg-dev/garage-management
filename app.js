@@ -28,6 +28,7 @@ const DATA_TABLES = ["customers", "vehicles", "jobs", "invoices", "expenses"];
 const DEFAULT_MECHANICS = ["Dom", "Steve", "Jay", "Callum", "Jack"];
 const MECHANIC_DAILY_HOURS = 8;
 const MECHANIC_WEEKLY_HOURS = 40;
+const WORK_LOG_TYPE = "sales-work-log";
 
 const seedData = {
   customers: [],
@@ -50,6 +51,7 @@ let profitUnlocked = false;
 let currentUser = null;
 let currentProfile = null;
 let loginLogs = [];
+let userProfiles = [];
 let remoteReady = false;
 let syncingRemote = false;
 let remoteSavePending = false;
@@ -94,12 +96,24 @@ const partsTotal = (items = []) => items.filter((item) => itemType(item) === "pa
 const jobLabourTotal = (job) => labourItemsTotal(job?.lineItems || []);
 const jobTotal = (job) => jobLabourTotal(job) + partsTotal(job?.lineItems || []);
 const allLabourIncome = () => state.jobs.reduce((total, job) => total + jobLabourTotal(job), 0);
-const expensesTotal = () => state.expenses.reduce((total, expense) => total + Number(expense.amount || 0), 0);
+const expensesTotal = () => state.expenses.filter((expense) => expense.type !== WORK_LOG_TYPE).reduce((total, expense) => total + Number(expense.amount || 0), 0);
 const invoiceForJob = (jobId) => state.invoices.find((invoice) => invoice.job === jobId);
 const isJobPaid = (job) => invoiceForJob(job.id)?.status === "Paid";
 const paidLabourIncome = () => state.jobs.reduce((total, job) => total + (isJobPaid(job) ? jobLabourTotal(job) : 0), 0);
 const paidPartsIncome = () => state.jobs.reduce((total, job) => total + (isJobPaid(job) ? partsTotal(job.lineItems || []) : 0), 0);
 const profit = () => paidLabourIncome() - expensesTotal();
+const workLogs = () => state.expenses.filter((entry) => entry.type === WORK_LOG_TYPE);
+
+function workLogHours(entry) {
+  const [startHour, startMinute] = String(entry.startTime || "").split(":").map(Number);
+  const [endHour, endMinute] = String(entry.endTime || "").split(":").map(Number);
+  if (![startHour, startMinute, endHour, endMinute].every(Number.isFinite)) return 0;
+  return Math.max(0, ((endHour * 60 + endMinute) - (startHour * 60 + startMinute)) / 60);
+}
+
+function formatHours(value) {
+  return `${Number(value || 0).toFixed(2).replace(/\.00$/, "")} hrs`;
+}
 
 function customerForJob(job) {
   const vehicle = job ? byId("vehicles", job.vehicle) : null;
@@ -325,6 +339,8 @@ function applyRoleAccess() {
   document.querySelectorAll('[data-view="profit"], [data-view="userLogs"]').forEach((item) => {
     item.classList.toggle("hidden", !isAdmin());
   });
+  document.querySelector("#workLogUserField").classList.toggle("hidden", !isAdmin());
+  document.querySelector('#workLogForm select[name="workLogUser"]').required = isAdmin();
   if (!canView(document.querySelector(".active-view")?.id)) setView("dashboard");
 }
 
@@ -338,7 +354,7 @@ function setView(viewId) {
   if (viewId !== "profit") profitUnlocked = false;
   views.forEach((view) => view.classList.toggle("active-view", view.id === viewId));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === viewId));
-  pageTitle.textContent = viewId === "jobs" ? "Quotes" : viewId === "userLogs" ? "User Logs" : viewId[0].toUpperCase() + viewId.slice(1);
+  pageTitle.textContent = viewId === "jobs" ? "Quotes" : viewId === "userLogs" ? "User Logs" : viewId === "workLogs" ? "Work Log" : viewId[0].toUpperCase() + viewId.slice(1);
   render();
   if (viewId === "userLogs") refreshAdminLogs();
 }
@@ -559,7 +575,7 @@ function renderProfit() {
     const jobProfit = paid ? jobLabourTotal(job) : 0;
     return `<tr><td><strong>${quoteTitle(job)}</strong></td><td>${vehicleLabel(job.vehicle)}</td><td>${paid ? "Paid" : "Unpaid"}</td><td>${money(jobLabourTotal(job))}</td><td>${money(partsTotal(job.lineItems))}</td><td>${money(jobProfit)}</td></tr>`;
   }).join("");
-  const expenseRows = state.expenses.map((expense) => `
+  const expenseRows = state.expenses.filter((expense) => expense.type !== WORK_LOG_TYPE).map((expense) => `
     <tr>
       <td><strong>${expenseTypeLabel(expense.type)}</strong></td>
       <td>${expense.type === "mechanic" ? expense.mechanicName || "-" : "-"}</td>
@@ -582,6 +598,95 @@ function renderProfit() {
     <h2>Quotes</h2>
     <table><thead><tr><th>Quote</th><th>Vehicle</th><th>Payment</th><th>Labour</th><th>Parts</th><th>Paid labour counted</th></tr></thead><tbody>${jobRows || `<tr><td colspan="6">No quotes yet.</td></tr>`}</tbody></table>
   `;
+}
+
+function renderWorkLogUserOptions(selectedEmail = null) {
+  const select = document.querySelector('#workLogForm select[name="workLogUser"]');
+  if (!select) return;
+  const currentSelection = select.value;
+  const users = new Map();
+  const addUser = (email, userId = "") => {
+    const normalizedEmail = String(email || "").trim();
+    if (!normalizedEmail) return;
+    const existing = users.get(normalizedEmail);
+    users.set(normalizedEmail, { email: normalizedEmail, userId: userId || existing?.userId || "" });
+  };
+  userProfiles.forEach((profile) => addUser(profile.email, profile.user_id));
+  loginLogs.forEach((entry) => addUser(entry.user_email));
+  workLogs().forEach((entry) => addUser(entry.userEmail, entry.userId));
+  addUser(currentUser?.email, currentUser?.id);
+  const options = [...users.values()].sort((first, second) => first.email.localeCompare(second.email));
+  select.innerHTML = options.length
+    ? options.map((user) => `<option value="${user.email}">${user.email}</option>`).join("")
+    : `<option value="">No users found</option>`;
+  const preferredEmail = selectedEmail || currentSelection || currentUser?.email;
+  if (options.some((user) => user.email === preferredEmail)) select.value = preferredEmail;
+}
+
+function renderWorkLogs() {
+  const panel = document.querySelector("#workLogsList");
+  if (!panel) return;
+  renderWorkLogUserOptions();
+  const scopedLogs = workLogs()
+    .filter((entry) => isAdmin() || entry.userId === currentUser?.id || entry.userEmail === currentUser?.email);
+  const visibleLogs = scopedLogs
+    .filter((entry) => !searchTerm || [entry.userEmail, entry.description, entry.workDate, entry.startTime, entry.endTime].join(" ").toLowerCase().includes(searchTerm))
+    .sort((first, second) => `${second.workDate} ${second.startTime}`.localeCompare(`${first.workDate} ${first.startTime}`));
+  const totalHours = scopedLogs.reduce((total, entry) => total + workLogHours(entry), 0);
+  const userTotals = isAdmin()
+    ? [...scopedLogs.reduce((totals, entry) => {
+      const email = entry.userEmail || "Unknown user";
+      totals.set(email, (totals.get(email) || 0) + workLogHours(entry));
+      return totals;
+    }, new Map()).entries()]
+    : [];
+  const rows = visibleLogs.map((entry) => `
+    <tr>
+      ${isAdmin() ? `<td><strong>${entry.userEmail || "Unknown user"}</strong></td>` : ""}
+      <td>${formatDate(entry.workDate)}</td>
+      <td>${entry.startTime}–${entry.endTime}</td>
+      <td>${entry.description}</td>
+      <td><strong>${formatHours(workLogHours(entry))}</strong></td>
+      ${isAdmin() ? `<td><div class="row-actions"><button class="small-button" data-work-log-edit="${entry.id}">Edit</button><button class="small-button danger-button" data-work-log-delete="${entry.id}">Delete</button></div></td>` : ""}
+    </tr>
+  `).join("");
+  const columnCount = isAdmin() ? 6 : 4;
+  panel.innerHTML = `
+    <h2>${isAdmin() ? "All work logs" : "My work logs"}</h2>
+    <div class="work-log-summary">
+      <div class="profit-box"><span>${isAdmin() ? "Total hours worked" : "Your total hours"}</span><strong>${formatHours(totalHours)}</strong></div>
+      ${userTotals.map(([email, hours]) => `<div class="profit-box"><span>${email}</span><strong>${formatHours(hours)}</strong></div>`).join("")}
+    </div>
+    <table><thead><tr>${isAdmin() ? "<th>User</th>" : ""}<th>Date</th><th>Time</th><th>Description</th><th>Hours</th>${isAdmin() ? "<th></th>" : ""}</tr></thead><tbody>${rows || `<tr><td colspan="${columnCount}">No work logged yet.</td></tr>`}</tbody></table>
+  `;
+}
+
+function resetWorkLogForm() {
+  const form = document.querySelector("#workLogForm");
+  form.reset();
+  form.elements.workLogId.value = "";
+  form.elements.workDate.value = dateKey(new Date());
+  renderWorkLogUserOptions(currentUser?.email);
+  document.querySelector("#workLogFormTitle").textContent = "Log work";
+  document.querySelector("#saveWorkLogBtn").textContent = "Save work log";
+  document.querySelector("#cancelWorkLogEditBtn").classList.add("hidden");
+}
+
+function editWorkLog(entryId) {
+  if (!isAdmin()) return;
+  const entry = workLogs().find((item) => item.id === entryId);
+  if (!entry) return;
+  const form = document.querySelector("#workLogForm");
+  form.elements.workLogId.value = entry.id;
+  form.elements.workDate.value = entry.workDate;
+  form.elements.startTime.value = entry.startTime;
+  form.elements.endTime.value = entry.endTime;
+  form.elements.description.value = entry.description;
+  renderWorkLogUserOptions(entry.userEmail);
+  document.querySelector("#workLogFormTitle").textContent = `Edit ${entry.userEmail || "work"} entry`;
+  document.querySelector("#saveWorkLogBtn").textContent = "Save changes";
+  document.querySelector("#cancelWorkLogEditBtn").classList.remove("hidden");
+  form.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderUserLogs() {
@@ -907,6 +1012,7 @@ async function signOutUser(message = "Signed out.", action = "logout") {
   currentUser = null;
   currentProfile = null;
   loginLogs = [];
+  userProfiles = [];
   remoteReady = false;
   remoteSavePending = false;
   profitUnlocked = false;
@@ -1058,6 +1164,20 @@ async function loadCurrentProfile(user) {
   if (data) currentProfile = { ...data, role: String(data.role || "sales").trim().toLowerCase() };
 }
 
+async function loadUserProfiles() {
+  userProfiles = [];
+  if (!isAdmin() || !supabaseClient) return;
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("user_id,email,role")
+    .order("email", { ascending: true });
+  if (error) {
+    console.error("User profiles load failed", error);
+    return;
+  }
+  userProfiles = data || [];
+}
+
 async function loadLoginLogs() {
   if (!isAdmin()) {
     loginLogs = [];
@@ -1095,10 +1215,12 @@ async function handleSignedIn(user) {
   currentUser = user;
   setLoginMessage("Loading workshop data...");
   await loadCurrentProfile(user);
+  await loadUserProfiles();
   await recordLoginAction("login", user);
   await loadStateFromSupabase();
   await loadLoginLogs();
   render();
+  resetWorkLogForm();
   setVehicleMode("new");
   renderQuoteBuilder();
   applyRoleAccess();
@@ -1139,6 +1261,7 @@ function render() {
   renderCustomers();
   renderVehicles();
   renderInvoices();
+  renderWorkLogs();
   renderProfit();
   renderUserLogs();
 }
@@ -1401,6 +1524,51 @@ document.querySelector("#expenseForm").addEventListener("submit", (event) => {
   render();
 });
 
+document.querySelector("#workLogForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const entryId = form.get("workLogId");
+  const existingEntry = entryId ? workLogs().find((entry) => entry.id === entryId) : null;
+  if (entryId && (!isAdmin() || !existingEntry)) {
+    window.alert("Only an administrator can edit existing work logs.");
+    resetWorkLogForm();
+    return;
+  }
+  const selectedUserEmail = isAdmin() ? String(form.get("workLogUser") || "").trim() : currentUser.email;
+  if (!selectedUserEmail) {
+    window.alert("Choose a user before saving the work log.");
+    return;
+  }
+  const selectedProfile = userProfiles.find((profile) => profile.email === selectedUserEmail);
+  const knownUserLog = workLogs().find((entry) => entry.userEmail === selectedUserEmail);
+  const selectedUserId = selectedProfile?.user_id || knownUserLog?.userId || (selectedUserEmail === currentUser.email ? currentUser.id : "");
+  const nextEntry = existingEntry || {
+    id: makeId("wl"),
+    type: WORK_LOG_TYPE,
+    createdAt: new Date().toISOString(),
+    amount: 0
+  };
+  Object.assign(nextEntry, {
+    userId: selectedUserId,
+    userEmail: selectedUserEmail,
+    workDate: form.get("workDate"),
+    startTime: form.get("startTime"),
+    endTime: form.get("endTime"),
+    description: String(form.get("description") || "").trim(),
+    updatedAt: new Date().toISOString()
+  });
+  if (workLogHours(nextEntry) <= 0) {
+    window.alert("End time must be later than start time.");
+    return;
+  }
+  if (!existingEntry) state.expenses.push(nextEntry);
+  resetWorkLogForm();
+  save();
+  render();
+});
+
+document.querySelector("#cancelWorkLogEditBtn").addEventListener("click", resetWorkLogForm);
+
 document.addEventListener("change", (event) => {
   const jobId = event.target.dataset.jobStatus;
   const mechanicJobId = event.target.dataset.jobMechanic;
@@ -1451,6 +1619,23 @@ document.addEventListener("click", (event) => {
   if (availabilityDate) {
     document.querySelector('#jobForm input[name="due"]').value = availabilityDate;
     renderMechanicAvailability();
+    return;
+  }
+
+  const workLogEditId = event.target.closest("[data-work-log-edit]")?.dataset.workLogEdit;
+  if (workLogEditId) {
+    editWorkLog(workLogEditId);
+    return;
+  }
+
+  const workLogDeleteId = event.target.closest("[data-work-log-delete]")?.dataset.workLogDelete;
+  if (workLogDeleteId && isAdmin()) {
+    const entry = workLogs().find((item) => item.id === workLogDeleteId);
+    if (!entry || !window.confirm(`Delete this work log for ${entry.userEmail || "this user"}?`)) return;
+    state.expenses = state.expenses.filter((item) => item.id !== entry.id);
+    if (document.querySelector('#workLogForm [name="workLogId"]').value === entry.id) resetWorkLogForm();
+    save();
+    render();
     return;
   }
 

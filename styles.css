@@ -816,6 +816,13 @@ dialog::backdrop {
   margin-bottom: 16px;
 }
 
+.work-log-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
 .profit-box {
   border: 1px solid var(--line);
   border-radius: 8px;

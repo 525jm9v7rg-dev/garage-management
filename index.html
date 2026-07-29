@@ -39,6 +39,7 @@
           <button class="nav-item" data-view="customers">Customers</button>
           <button class="nav-item" data-view="vehicles">Vehicles</button>
           <button class="nav-item" data-view="invoices">Invoices</button>
+          <button class="nav-item" data-view="workLogs">Work Log</button>
           <button class="nav-item" data-view="profit">Profit</button>
           <button class="nav-item" data-view="userLogs">User Logs</button>
         </nav>
@@ -144,6 +145,27 @@
 
         <section id="invoices" class="view">
           <div id="invoicesList" class="table-panel full"></div>
+        </section>
+
+        <section id="workLogs" class="view">
+          <div class="two-column">
+            <form id="workLogForm" class="form-panel">
+              <h2 id="workLogFormTitle">Log work</h2>
+              <input name="workLogId" type="hidden" />
+              <label id="workLogUserField" class="hidden">User / username<select name="workLogUser"></select></label>
+              <label>Date<input required name="workDate" type="date" /></label>
+              <div class="form-grid">
+                <label>Start time<input required name="startTime" type="time" /></label>
+                <label>End time<input required name="endTime" type="time" /></label>
+              </div>
+              <label>Description<textarea required name="description" placeholder="Describe the work completed..."></textarea></label>
+              <div class="row-actions">
+                <button id="saveWorkLogBtn" class="primary-button" type="submit">Save work log</button>
+                <button id="cancelWorkLogEditBtn" class="ghost-button hidden" type="button">Cancel edit</button>
+              </div>
+            </form>
+            <div id="workLogsList" class="table-panel"></div>
+          </div>
         </section>
 
         <section id="profit" class="view">
