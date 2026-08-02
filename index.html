@@ -94,6 +94,7 @@
               <button class="segment" data-job-filter="In progress">In progress</button>
               <button class="segment" data-job-filter="Ready">Ready</button>
               <button class="segment" data-job-filter="Collected">Collected</button>
+              <button class="segment" data-job-filter="Archived">Archived</button>
             </div>
           </div>
           <div id="jobsGrid" class="card-grid"></div>
@@ -175,7 +176,7 @@
           <div class="two-column">
             <section class="form-panel">
               <h2>Add expense</h2>
-              <p class="muted">Net profit is paid labour income minus all recorded expenses. Parts are shown separately.</p>
+              <p class="muted">Monthly net profit is paid labour income minus expenses dated within the same calendar month. Parts are shown separately.</p>
               <form id="expenseForm">
                 <label>Expense type
                   <select name="type" id="expenseType">
@@ -186,7 +187,8 @@
                   </select>
                 </label>
                 <label id="mechanicNameField">Mechanic name<input name="mechanicName" placeholder="Mechanic name" /></label>
-                <label>Description<input name="description" placeholder="Weekly wages, July rent, parts order..." /></label>
+                <label>Expense date<input required name="expenseDate" type="date" /></label>
+                <label>Description<input name="description" placeholder="Weekly wages, rent, parts order..." /></label>
                 <label>Amount<input required name="amount" type="number" min="0" step="0.01" placeholder="250.00" /></label>
                 <button class="primary-button" type="submit">Add expense</button>
               </form>

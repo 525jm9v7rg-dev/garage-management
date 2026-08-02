@@ -816,6 +816,36 @@ dialog::backdrop {
   margin-bottom: 16px;
 }
 
+.profit-month-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding-bottom: 6px;
+  overflow-x: auto;
+}
+
+.profit-month-tab {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 12px;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.profit-month-tab.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 800;
+}
+
+.overall-profit {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
 .work-log-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));

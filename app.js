@@ -42,6 +42,7 @@ localStorage.removeItem("garageDeskState");
 
 let state = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null") || seedData;
 let currentJobFilter = "all";
+let selectedProfitMonth = null;
 let searchTerm = "";
 let activeQuoteItems = [];
 let activeInvoiceId = null;
@@ -76,8 +77,11 @@ const newVehicleFields = document.querySelector("#newVehicleFields");
 const existingCustomerField = document.querySelector("#existingCustomerField");
 const newCustomerFields = document.querySelector("#newCustomerFields");
 
-const save = () => {
+const saveLocal = () => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+};
+const save = () => {
+  saveLocal();
   queueRemoteSave();
 };
 const money = (value) => new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(Number(value || 0));
@@ -88,6 +92,12 @@ const formatDate = (value) => {
   const [year, month, day] = value.split("-");
   return year && month && day ? `${day}/${month}/${year}` : value;
 };
+const generatedRecordDate = (id) => {
+  const timestamp = Number.parseInt(String(id || "").slice(1, -4), 36);
+  if (!Number.isFinite(timestamp)) return "";
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? "" : dateKey(date);
+};
 const lineTotal = (item) => Number(item.qty || 0) * Number(item.unitPrice || 0);
 const itemType = (item) => item.type || "part";
 const partStatus = (item) => item.status || "Needed";
@@ -95,14 +105,45 @@ const labourItemsTotal = (items = []) => items.filter((item) => itemType(item) =
 const partsTotal = (items = []) => items.filter((item) => itemType(item) === "part").reduce((total, item) => total + lineTotal(item), 0);
 const jobLabourTotal = (job) => labourItemsTotal(job?.lineItems || []);
 const jobTotal = (job) => jobLabourTotal(job) + partsTotal(job?.lineItems || []);
-const allLabourIncome = () => state.jobs.reduce((total, job) => total + jobLabourTotal(job), 0);
-const expensesTotal = () => state.expenses.filter((expense) => expense.type !== WORK_LOG_TYPE).reduce((total, expense) => total + Number(expense.amount || 0), 0);
+const monthKey = (value) => String(value || "").slice(0, 7);
+const shiftedMonthKey = (offset = 0) => {
+  const date = new Date();
+  date.setDate(1);
+  date.setMonth(date.getMonth() + offset);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+};
+const monthName = (value) => new Date(`${value}-01T12:00:00`).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+const expensesTotal = (month = null) => state.expenses
+  .filter((expense) => expense.type !== WORK_LOG_TYPE && (!month || monthKey(expense.expenseDate) === month))
+  .reduce((total, expense) => total + Number(expense.amount || 0), 0);
 const invoiceForJob = (jobId) => state.invoices.find((invoice) => invoice.job === jobId);
 const isJobPaid = (job) => invoiceForJob(job.id)?.status === "Paid";
-const paidLabourIncome = () => state.jobs.reduce((total, job) => total + (isJobPaid(job) ? jobLabourTotal(job) : 0), 0);
-const paidPartsIncome = () => state.jobs.reduce((total, job) => total + (isJobPaid(job) ? partsTotal(job.lineItems || []) : 0), 0);
-const profit = () => paidLabourIncome() - expensesTotal();
+const isJobPaidInMonth = (job, month = null) => {
+  const invoice = invoiceForJob(job.id);
+  return invoice?.status === "Paid" && (!month || monthKey(invoice.paidDate) === month);
+};
+const paidLabourIncome = (month = null) => state.jobs.reduce((total, job) => total + (isJobPaidInMonth(job, month) ? jobLabourTotal(job) : 0), 0);
+const profit = (month = null) => paidLabourIncome(month) - expensesTotal(month);
+const paidLabourIncomeThrough = (month) => state.jobs.reduce((total, job) => {
+  const invoice = invoiceForJob(job.id);
+  return total + (invoice?.status === "Paid" && monthKey(invoice.paidDate) <= month ? jobLabourTotal(job) : 0);
+}, 0);
+const expensesTotalThrough = (month) => state.expenses
+  .filter((expense) => expense.type !== WORK_LOG_TYPE && monthKey(expense.expenseDate) <= month)
+  .reduce((total, expense) => total + Number(expense.amount || 0), 0);
+const profitThrough = (month) => paidLabourIncomeThrough(month) - expensesTotalThrough(month);
 const workLogs = () => state.expenses.filter((entry) => entry.type === WORK_LOG_TYPE);
+
+function updateJobArchive(job) {
+  const invoice = invoiceForJob(job.id);
+  const shouldArchive = job.status === "Collected"
+    && invoice?.status === "Paid"
+    && Boolean(invoice.paidDate)
+    && monthKey(invoice.paidDate) < shiftedMonthKey(0);
+  job.archived = shouldArchive;
+  if (shouldArchive && !job.archivedAt) job.archivedAt = dateKey(new Date());
+  if (!shouldArchive) job.archivedAt = "";
+}
 
 function workLogHours(entry) {
   const [startHour, startMinute] = String(entry.startTime || "").split(":").map(Number);
@@ -150,10 +191,13 @@ function normalizeState() {
   state.invoices = Array.isArray(state.invoices) ? state.invoices : [];
   state.expenses = Array.isArray(state.expenses) ? state.expenses : [];
   state.expenses.forEach((entry) => {
-    if (entry.type !== WORK_LOG_TYPE) return;
-    if (entry.createdById === undefined) entry.createdById = entry.userId || "";
-    if (entry.createdByEmail === undefined) entry.createdByEmail = entry.userEmail || "";
-    if (entry.createdByRole === undefined) entry.createdByRole = "sales";
+    if (entry.type === WORK_LOG_TYPE) {
+      if (entry.createdById === undefined) entry.createdById = entry.userId || "";
+      if (entry.createdByEmail === undefined) entry.createdByEmail = entry.userEmail || "";
+      if (entry.createdByRole === undefined) entry.createdByRole = "sales";
+      return;
+    }
+    if (!entry.expenseDate) entry.expenseDate = String(entry.createdAt || "").slice(0, 10) || generatedRecordDate(entry.id) || dateKey(new Date());
   });
   state.customers.forEach((customer) => {
     if (customer.address === undefined) customer.address = "";
@@ -188,10 +232,13 @@ function normalizeState() {
         job.readyDate = ["Ready", "Collected"].includes(job.status) ? invoice.due || job.due || "" : "";
       }
       invoice.due = job.readyDate || "";
+      if (invoice.status === "Paid" && !invoice.paidDate) invoice.paidDate = invoice.due || job.readyDate || job.due || dateKey(new Date());
+      if (invoice.status !== "Paid" && invoice.paidDate === undefined) invoice.paidDate = "";
       invoice.amount = invoiceTotal(invoice);
+      updateJobArchive(job);
     }
   });
-  save();
+  saveLocal();
 }
 
 function expenseTypeLabel(type) {
@@ -236,6 +283,12 @@ function mechanicOptions() {
 
 function dateFromKey(value) {
   return new Date(`${value}T12:00:00`);
+}
+
+function nextWeekday(value = dateKey(new Date())) {
+  const date = dateFromKey(value);
+  while ([0, 6].includes(date.getDay())) date.setDate(date.getDate() + 1);
+  return dateKey(date);
 }
 
 function weekStartKey(value) {
@@ -379,7 +432,7 @@ function statusTone(status) {
   if (status === "Booked" || status === "Unpaid") return "bad";
   if (status === "In progress") return "warn";
   if (status === "Ready" || status === "Paid") return "good";
-  if (status === "Collected") return "done";
+  if (status === "Collected" || status === "Archived") return "done";
   return "";
 }
 
@@ -400,7 +453,9 @@ function renderDashboard() {
 
 function renderJobs() {
   const filtered = state.jobs.filter((job) => {
-    const statusMatches = currentJobFilter === "all" || job.status === currentJobFilter;
+    const statusMatches = currentJobFilter === "Archived"
+      ? job.archived
+      : !job.archived && (currentJobFilter === "all" || job.status === currentJobFilter);
     const searchMatches = !searchTerm || jobSearchText(job).includes(searchTerm);
     return statusMatches && searchMatches;
   });
@@ -408,16 +463,22 @@ function renderJobs() {
   if (currentJobFilter === "Collected") {
     filtered.sort((firstJob, secondJob) => Number(isJobPaid(firstJob)) - Number(isJobPaid(secondJob)));
   }
+  if (currentJobFilter === "Archived") {
+    filtered.sort((firstJob, secondJob) => String(invoiceForJob(secondJob.id)?.paidDate || "").localeCompare(String(invoiceForJob(firstJob.id)?.paidDate || "")));
+  }
 
   document.querySelector("#jobsGrid").innerHTML = filtered.length
     ? filtered.map((job) => {
       const invoice = invoiceForJob(job.id);
-      const collectedInvoiceAction = job.status === "Collected" && invoice
+      const collectedInvoiceAction = !job.archived && job.status === "Collected" && invoice
         ? `<button class="small-button payment-button ${invoice.status === "Paid" ? "payment-recorded" : "payment-outstanding"}" type="button" data-invoice-toggle="${invoice.id}">${invoice.status === "Paid" ? "Paid" : "Not Paid"}</button>`
         : "";
-      const editQuoteAction = job.status === "Collected"
+      const editQuoteAction = job.status === "Collected" || job.archived
         ? ""
         : `<button class="small-button" type="button" data-job-edit="${job.id}">Edit quote</button>`;
+      const archivedActions = job.archived && invoice
+        ? `<button class="small-button" type="button" data-invoice-view="${invoice.id}">View invoice</button><button class="small-button" type="button" data-invoice-print="${invoice.id}">Print invoice</button>`
+        : "";
       return `
         <article class="job-card ${statusTone(job.status)}">
           <div class="job-card-header">
@@ -425,7 +486,7 @@ function renderJobs() {
               <h3>${vehicleRegistration(job.vehicle)}</h3>
               <span class="muted">${quoteTitle(job)} - ${byId("vehicles", job.vehicle)?.model || "Unknown model"}</span>
             </div>
-            ${statusBadge(job.status)}
+            ${statusBadge(job.archived ? "Archived" : job.status)}
           </div>
           <div class="job-meta">
             <span>Job date: ${formatDate(job.due)}</span>
@@ -440,9 +501,10 @@ function renderJobs() {
           <div class="row-actions">
             ${editQuoteAction}
             ${collectedInvoiceAction}
-            <button class="small-button danger-button" type="button" data-job-delete="${job.id}">Delete job</button>
+            ${archivedActions}
+            ${job.archived ? "" : `<button class="small-button danger-button" type="button" data-job-delete="${job.id}">Delete job</button>`}
           </div>
-          <label>Mechanic
+          ${job.archived ? `<div class="muted">Paid ${formatDate(invoice?.paidDate)} · Archived ${formatDate(job.archivedAt)}</div>` : `<label>Mechanic
             <select data-job-mechanic="${job.id}">
               ${mechanicOptions().map((name) => `<option value="${name}" ${name === (job.mechanic || "Unassigned") ? "selected" : ""}>${name}</option>`).join("")}
             </select>
@@ -451,7 +513,7 @@ function renderJobs() {
             <select data-job-status="${job.id}">
               ${["Booked", "In progress", "Ready", "Collected"].map((status) => `<option ${status === job.status ? "selected" : ""}>${status}</option>`).join("")}
             </select>
-          </label>
+          </label>`}
         </article>
       `;
     }).join("")
@@ -479,13 +541,17 @@ function renderCalendar() {
         <div class="calendar-day ${inMonth ? "" : "muted-day"} ${calendarDay === today ? "today" : ""}">
           <div class="calendar-date">${inMonth ? dayNumber : ""}</div>
           <div class="calendar-jobs">
-            ${dayJobs.map((job) => `
-              <button class="calendar-job" type="button" data-job-edit="${job.id}">
+            ${dayJobs.map((job) => {
+              const archivedInvoice = job.archived ? invoiceForJob(job.id) : null;
+              const calendarAction = job.archived && archivedInvoice ? `data-invoice-view="${archivedInvoice.id}"` : `data-job-edit="${job.id}"`;
+              return `
+              <button class="calendar-job" type="button" ${calendarAction}>
                 <strong>${quoteTitle(job)}</strong>
                 <span>${vehicleLabel(job.vehicle)}</span>
-                <span>${job.mechanic || "Unassigned"} - ${job.status}</span>
+                <span>${job.mechanic || "Unassigned"} - ${job.archived ? "Archived" : job.status}</span>
               </button>
-            `).join("")}
+            `;
+            }).join("")}
           </div>
         </div>
       `;
@@ -576,36 +642,48 @@ function renderProfit() {
     document.querySelector("#profitList").innerHTML = `<div class="empty">Profit section locked.</div>`;
     return;
   }
-  const jobRows = state.jobs.map((job) => {
-    const paid = isJobPaid(job);
-    const jobProfit = paid ? jobLabourTotal(job) : 0;
-    return `<tr><td><strong>${quoteTitle(job)}</strong></td><td>${vehicleLabel(job.vehicle)}</td><td>${paid ? "Paid" : "Unpaid"}</td><td>${money(jobLabourTotal(job))}</td><td>${money(partsTotal(job.lineItems))}</td><td>${money(jobProfit)}</td></tr>`;
+  const availableMonths = Array.from({ length: 12 }, (_, index) => shiftedMonthKey(-index));
+  if (!selectedProfitMonth || !availableMonths.includes(selectedProfitMonth)) selectedProfitMonth = availableMonths[0];
+  const selectedMonthName = monthName(selectedProfitMonth);
+  const overallNetProfit = profitThrough(selectedProfitMonth);
+  const jobRows = state.jobs.filter((job) => isJobPaidInMonth(job, selectedProfitMonth)).map((job) => {
+    const invoice = invoiceForJob(job.id);
+    const paid = invoice?.status === "Paid";
+    const countedThisMonth = isJobPaidInMonth(job, selectedProfitMonth) ? jobLabourTotal(job) : 0;
+    return `<tr><td><strong>${quoteTitle(job)}</strong></td><td>${vehicleLabel(job.vehicle)}</td><td>${paid ? "Paid" : "Unpaid"}</td><td>${formatDate(invoice?.paidDate)}</td><td>${money(jobLabourTotal(job))}</td><td>${money(partsTotal(job.lineItems))}</td><td>${money(countedThisMonth)}</td></tr>`;
   }).join("");
-  const expenseRows = state.expenses.filter((expense) => expense.type !== WORK_LOG_TYPE).map((expense) => `
-    <tr>
-      <td><strong>${expenseTypeLabel(expense.type)}</strong></td>
-      <td>${expense.type === "mechanic" ? expense.mechanicName || "-" : "-"}</td>
-      <td>${expense.description || "-"}</td>
-      <td>${money(expense.amount)}</td>
-      <td><button class="small-button" data-expense-delete="${expense.id}">Delete</button></td>
-    </tr>
+  const expenseRows = state.expenses
+    .filter((expense) => expense.type !== WORK_LOG_TYPE && monthKey(expense.expenseDate) === selectedProfitMonth)
+    .slice()
+    .sort((first, second) => String(second.expenseDate || "").localeCompare(String(first.expenseDate || "")))
+    .map((expense) => `
+      <tr>
+        <td>${formatDate(expense.expenseDate)}</td>
+        <td><strong>${expenseTypeLabel(expense.type)}</strong></td>
+        <td>${expense.type === "mechanic" ? expense.mechanicName || "-" : "-"}</td>
+        <td>${expense.description || "-"}</td>
+        <td>${money(expense.amount)}</td>
+        <td><button class="small-button" data-expense-delete="${expense.id}">Delete</button></td>
+      </tr>
   `).join("");
   document.querySelector("#profitList").innerHTML = `
-    <h2>Profit</h2>
-    <div class="profit-grid">
-      <div class="profit-box"><span>Paid labour</span><strong>${money(paidLabourIncome())}</strong></div>
-      <div class="profit-box"><span>Total labour quoted</span><strong>${money(allLabourIncome())}</strong></div>
-      <div class="profit-box"><span>Paid invoice parts</span><strong>${money(paidPartsIncome())}</strong></div>
-      <div class="profit-box"><span>Expenses</span><strong>${money(expensesTotal())}</strong></div>
-      <div class="profit-box"><span>Net profit</span><strong>${money(profit())}</strong></div>
+    <div class="profit-month-tabs" role="tablist" aria-label="Profit month">
+      ${availableMonths.map((month) => `<button class="profit-month-tab ${month === selectedProfitMonth ? "active" : ""}" type="button" role="tab" aria-selected="${month === selectedProfitMonth}" data-profit-month="${month}">${monthName(month)}</button>`).join("")}
     </div>
+    <h2>Profit — ${selectedMonthName}</h2>
+    <div class="profit-grid">
+      <div class="profit-box overall-profit"><span>Overall net profit</span><strong>${money(overallNetProfit)}</strong></div>
+      <div class="profit-box"><span>${selectedMonthName} net profit</span><strong>${money(profit(selectedProfitMonth))}</strong></div>
+      <div class="profit-box"><span>${selectedMonthName} paid labour</span><strong>${money(paidLabourIncome(selectedProfitMonth))}</strong></div>
+      <div class="profit-box"><span>${selectedMonthName} expenses</span><strong>${money(expensesTotal(selectedProfitMonth))}</strong></div>
+    </div>
+    <p class="muted">Each month is calculated from invoices paid and expenses dated within that calendar month.</p>
     <h2>Expenses</h2>
-    <table><thead><tr><th>Type</th><th>Mechanic</th><th>Description</th><th>Amount</th><th></th></tr></thead><tbody>${expenseRows || `<tr><td colspan="5">No expenses yet.</td></tr>`}</tbody></table>
+    <table><thead><tr><th>Date</th><th>Type</th><th>Mechanic</th><th>Description</th><th>Amount</th><th></th></tr></thead><tbody>${expenseRows || `<tr><td colspan="6">No expenses yet.</td></tr>`}</tbody></table>
     <h2>Quotes</h2>
-    <table><thead><tr><th>Quote</th><th>Vehicle</th><th>Payment</th><th>Labour</th><th>Parts</th><th>Paid labour counted</th></tr></thead><tbody>${jobRows || `<tr><td colspan="6">No quotes yet.</td></tr>`}</tbody></table>
+    <table><thead><tr><th>Quote</th><th>Vehicle</th><th>Payment</th><th>Paid date</th><th>Labour</th><th>Parts</th><th>${selectedMonthName} labour counted</th></tr></thead><tbody>${jobRows || `<tr><td colspan="7">No quotes yet.</td></tr>`}</tbody></table>
   `;
 }
-
 function canManageWorkLog(entry) {
   if (isAdmin()) return true;
   const assignedToCurrentUser = entry.userId === currentUser?.id || entry.userEmail === currentUser?.email;
@@ -825,7 +903,7 @@ function renderQuoteBuilder() {
 function resetQuoteForm() {
   document.querySelector("#jobForm").reset();
   const currentDate = dateKey(new Date());
-  document.querySelector('#jobForm input[name="due"]').value = currentDate;
+  document.querySelector('#jobForm input[name="due"]').value = nextWeekday(currentDate);
   document.querySelector("#availabilityFrom").min = currentDate;
   document.querySelector("#availabilityFrom").value = currentDate;
   document.querySelector('#jobForm input[name="vehicleMode"][value="new"]').checked = true;
@@ -1061,9 +1139,9 @@ async function signOutUser(message = "Signed out.", action = "logout") {
 }
 
 function queueRemoteSave() {
-  if (!remoteReady || !supabaseClient) return;
+  if (!supabaseClient) return;
   remoteSavePending = true;
-  if (syncingRemote) return;
+  if (!remoteReady || syncingRemote) return;
   window.clearTimeout(saveTimer);
   saveTimer = window.setTimeout(() => {
     saveTimer = null;
@@ -1089,9 +1167,11 @@ async function loadStateFromSupabase({ pushLocalWhenEmpty = true, replaceWhenEmp
     if (remoteState[table].length) hasRemoteData = true;
   }
 
-  if (hasRemoteData || replaceWhenEmpty) state = remoteState;
+  if ((hasRemoteData || replaceWhenEmpty) && !remoteSavePending) state = remoteState;
   normalizeState();
   remoteReady = true;
+
+  if (remoteSavePending) queueRemoteSave();
 
   if (pushLocalWhenEmpty && !hasRemoteData && DATA_TABLES.some((table) => state[table].length)) {
     await saveStateToSupabase();
@@ -1116,6 +1196,18 @@ async function saveTableRows(table) {
   }
 }
 
+async function saveRemoteRecord(table, item) {
+  if (!supabaseClient || !item) throw new Error("Remote save is unavailable.");
+  if (!remoteReady) throw new Error("Remote data is refreshing.");
+  const { error } = await supabaseClient.from(table).upsert({ id: item.id, data: item }, { onConflict: "id" });
+  if (error) throw error;
+}
+
+async function broadcastRemoteChange() {
+  if (!realtimeChannel) return;
+  await realtimeChannel.send({ type: "broadcast", event: "state-changed", payload: { updatedAt: new Date().toISOString() } });
+}
+
 async function saveStateToSupabase() {
   if (!remoteReady || !supabaseClient) return;
   if (syncingRemote) {
@@ -1128,9 +1220,7 @@ async function saveStateToSupabase() {
     for (const table of DATA_TABLES) {
       await saveTableRows(table);
     }
-    if (realtimeChannel) {
-      await realtimeChannel.send({ type: "broadcast", event: "state-changed", payload: { updatedAt: new Date().toISOString() } });
-    }
+    await broadcastRemoteChange();
   } finally {
     syncingRemote = false;
     if (remoteSavePending) queueRemoteSave();
@@ -1254,6 +1344,7 @@ async function handleSignedIn(user) {
   await loadLoginLogs();
   render();
   resetWorkLogForm();
+  document.querySelector('#expenseForm [name="expenseDate"]').value = dateKey(new Date());
   setVehicleMode("new");
   renderQuoteBuilder();
   applyRoleAccess();
@@ -1414,7 +1505,7 @@ function addQuoteItem(type, nameSelector, qtySelector, priceSelector, statusSele
 document.querySelector("#addLabourBtn").addEventListener("click", () => addQuoteItem("labour", null, "#labourItemQty", "#labourItemPrice"));
 document.querySelector("#addPartBtn").addEventListener("click", () => addQuoteItem("part", "#partItemName", "#partItemQty", "#partItemPrice", "#partItemStatus"));
 
-document.querySelector("#jobForm").addEventListener("submit", (event) => {
+document.querySelector("#jobForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!activeQuoteItems.length) {
     window.alert("Add at least one labour or part line before saving the quote.");
@@ -1440,6 +1531,10 @@ document.querySelector("#jobForm").addEventListener("submit", (event) => {
       return;
     }
   }
+  const saveButton = document.querySelector("#saveJobBtn");
+  saveButton.disabled = true;
+  saveButton.textContent = "Saving quote...";
+  const remoteRecords = [];
   let vehicleId = form.get("vehicle");
   const existingJob = activeEditJobId ? byId("jobs", activeEditJobId) : null;
   const previousStatus = existingJob?.status || "";
@@ -1448,10 +1543,14 @@ document.querySelector("#jobForm").addEventListener("submit", (event) => {
     let customerId = form.get("newVehicleCustomer");
     if (form.get("customerMode") === "new" || !customerId) {
       customerId = makeId("c");
-      state.customers.push({ id: customerId, name: form.get("newCustomerName"), phone: form.get("newCustomerPhone"), email: form.get("newCustomerEmail"), address: form.get("newCustomerAddress"), postcode: form.get("newCustomerPostcode"), vatCustomer: form.has("newCustomerVat") });
+      const newCustomer = { id: customerId, name: form.get("newCustomerName"), phone: form.get("newCustomerPhone"), email: form.get("newCustomerEmail"), address: form.get("newCustomerAddress"), postcode: form.get("newCustomerPostcode"), vatCustomer: form.has("newCustomerVat") };
+      state.customers.push(newCustomer);
+      remoteRecords.push(["customers", newCustomer]);
     }
     vehicleId = makeId("v");
-    state.vehicles.push({ id: vehicleId, plate: form.get("newPlate").toUpperCase(), model: form.get("newModel"), owner: customerId, mileage: Number(form.get("newMileage")), motDue: form.get("newMotDue") });
+    const newVehicle = { id: vehicleId, plate: form.get("newPlate").toUpperCase(), model: form.get("newModel"), owner: customerId, mileage: Number(form.get("newMileage")), motDue: form.get("newMotDue") };
+    state.vehicles.push(newVehicle);
+    remoteRecords.push(["vehicles", newVehicle]);
   }
 
   if (activeEditJobId && form.get("vehicleMode") === "existing" && !vehicleId) {
@@ -1476,8 +1575,9 @@ document.querySelector("#jobForm").addEventListener("submit", (event) => {
   if (job.status === "Collected" && !job.readyDate) job.readyDate = dateKey(new Date());
   if (job.readyDate === undefined) job.readyDate = "";
 
+  let invoice;
   if (activeEditJobId) {
-    const invoice = state.invoices.find((item) => item.job === job.id);
+    invoice = state.invoices.find((item) => item.job === job.id);
     if (invoice) {
       invoice.vatEnabled = Boolean(customerForJob(job)?.vatCustomer);
       invoice.amount = invoiceTotal(invoice);
@@ -1485,9 +1585,23 @@ document.querySelector("#jobForm").addEventListener("submit", (event) => {
     }
   } else {
     state.jobs.unshift(job);
-    const invoice = { id: makeId("i"), job: job.id, amount: 0, status: "Unpaid", due: job.readyDate || "", vatEnabled: Boolean(customerForJob(job)?.vatCustomer) };
+    invoice = { id: makeId("i"), job: job.id, amount: 0, status: "Unpaid", paidDate: "", due: job.readyDate || "", vatEnabled: Boolean(customerForJob(job)?.vatCustomer) };
     invoice.amount = invoiceTotal(invoice);
     state.invoices.unshift(invoice);
+  }
+
+  remoteRecords.push(["jobs", job]);
+  if (invoice) remoteRecords.push(["invoices", invoice]);
+  updateJobArchive(job);
+  saveLocal();
+  let syncDelayed = false;
+  try {
+    for (const [table, record] of remoteRecords) await saveRemoteRecord(table, record);
+    await broadcastRemoteChange();
+  } catch (error) {
+    syncDelayed = true;
+    console.error("Quote direct save failed", error);
+    queueRemoteSave();
   }
 
   event.currentTarget.reset();
@@ -1495,9 +1609,11 @@ document.querySelector("#jobForm").addEventListener("submit", (event) => {
   activeEditJobId = null;
   renderQuoteBuilder();
   setVehicleMode("new");
+  saveButton.disabled = false;
+  saveButton.textContent = "Create quote";
   jobDialog.close();
-  save();
   setView("jobs");
+  if (syncDelayed) window.alert("The quote is saved on this device. Cloud sync is retrying automatically.");
 });
 
 document.querySelector("#customerForm").addEventListener("submit", (event) => {
@@ -1550,10 +1666,13 @@ document.querySelector("#expenseForm").addEventListener("submit", (event) => {
     id: makeId("e"),
     type,
     mechanicName: type === "mechanic" ? form.get("mechanicName") : "",
+    expenseDate: form.get("expenseDate"),
     description: form.get("description"),
-    amount: Number(form.get("amount"))
+    amount: Number(form.get("amount")),
+    createdAt: new Date().toISOString()
   });
   event.currentTarget.reset();
+  document.querySelector('#expenseForm [name="expenseDate"]').value = dateKey(new Date());
   document.querySelector("#mechanicNameField").classList.remove("hidden");
   save();
   render();
@@ -1632,6 +1751,7 @@ document.addEventListener("change", (event) => {
     job.status = nextStatus;
     const invoice = invoiceForJob(job.id);
     if (invoice) invoice.due = job.readyDate || "";
+    updateJobArchive(job);
     save();
     render();
   }
@@ -1653,6 +1773,13 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const profitMonth = event.target.closest("[data-profit-month]")?.dataset.profitMonth;
+  if (profitMonth) {
+    selectedProfitMonth = profitMonth;
+    renderProfit();
+    return;
+  }
+
   const availabilityDate = event.target.closest("[data-availability-date]")?.dataset.availabilityDate;
   if (availabilityDate) {
     document.querySelector('#jobForm input[name="due"]').value = availabilityDate;
@@ -1792,6 +1919,9 @@ document.addEventListener("click", (event) => {
   if (invoiceId) {
     const invoice = byId("invoices", invoiceId);
     invoice.status = invoice.status === "Paid" ? "Unpaid" : "Paid";
+    invoice.paidDate = invoice.status === "Paid" ? dateKey(new Date()) : "";
+    const job = byId("jobs", invoice.job);
+    if (job) updateJobArchive(job);
     save();
     render();
   }
