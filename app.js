@@ -21,6 +21,7 @@ const business = {
 const VAT_RATE = 0.2;
 const PROFIT_PASSWORD = "240710";
 const SALES_INACTIVITY_MS = 10 * 60 * 1000;
+const REMOTE_REQUEST_TIMEOUT_MS = 10000;
 const STORAGE_KEY = "garageDeskStateFirstUse";
 const SUPABASE_URL = "https://jlnfsafgonfuzuetgmhj.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpsbmZzYWZnb25mdXp1ZXRnbWhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5MzQ4MzcsImV4cCI6MjA5OTUxMDgzN30.Nwg6AfGPGGiofZjO4BLubjRsx6QqRSgEiBwvZ-LKjCQ";
@@ -84,6 +85,19 @@ const save = () => {
   saveLocal();
   queueRemoteSave();
 };
+const withTimeout = (promise, message = "The cloud request timed out.") => new Promise((resolve, reject) => {
+  const timeoutId = window.setTimeout(() => reject(new Error(message)), REMOTE_REQUEST_TIMEOUT_MS);
+  Promise.resolve(promise).then(
+    (value) => {
+      window.clearTimeout(timeoutId);
+      resolve(value);
+    },
+    (error) => {
+      window.clearTimeout(timeoutId);
+      reject(error);
+    }
+  );
+});
 const money = (value) => new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(Number(value || 0));
 const byId = (collection, id) => state[collection].find((item) => item.id === id);
 const makeId = (prefix) => `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -1199,13 +1213,19 @@ async function saveTableRows(table) {
 async function saveRemoteRecord(table, item) {
   if (!supabaseClient || !item) throw new Error("Remote save is unavailable.");
   if (!remoteReady) throw new Error("Remote data is refreshing.");
-  const { error } = await supabaseClient.from(table).upsert({ id: item.id, data: item }, { onConflict: "id" });
+  const { error } = await withTimeout(
+    supabaseClient.from(table).upsert({ id: item.id, data: item }, { onConflict: "id" }),
+    `Saving ${table} to the cloud timed out.`
+  );
   if (error) throw error;
 }
 
 async function broadcastRemoteChange() {
   if (!realtimeChannel) return;
-  await realtimeChannel.send({ type: "broadcast", event: "state-changed", payload: { updatedAt: new Date().toISOString() } });
+  await withTimeout(
+    realtimeChannel.send({ type: "broadcast", event: "state-changed", payload: { updatedAt: new Date().toISOString() } }),
+    "Notifying other users timed out."
+  );
 }
 
 async function saveStateToSupabase() {
@@ -1594,16 +1614,9 @@ document.querySelector("#jobForm").addEventListener("submit", async (event) => {
   if (invoice) remoteRecords.push(["invoices", invoice]);
   updateJobArchive(job);
   saveLocal();
-  let syncDelayed = false;
-  try {
-    for (const [table, record] of remoteRecords) await saveRemoteRecord(table, record);
-    await broadcastRemoteChange();
-  } catch (error) {
-    syncDelayed = true;
-    console.error("Quote direct save failed", error);
-    queueRemoteSave();
-  }
 
+  // The quote is safely stored on this device. Close the editor immediately so
+  // a slow cloud connection cannot leave users stuck on "Saving quote...".
   event.currentTarget.reset();
   activeQuoteItems = [];
   activeEditJobId = null;
@@ -1613,6 +1626,16 @@ document.querySelector("#jobForm").addEventListener("submit", async (event) => {
   saveButton.textContent = "Create quote";
   jobDialog.close();
   setView("jobs");
+
+  let syncDelayed = false;
+  try {
+    for (const [table, record] of remoteRecords) await saveRemoteRecord(table, record);
+    await broadcastRemoteChange();
+  } catch (error) {
+    syncDelayed = true;
+    console.error("Quote direct save failed", error);
+    queueRemoteSave();
+  }
   if (syncDelayed) window.alert("The quote is saved on this device. Cloud sync is retrying automatically.");
 });
 
