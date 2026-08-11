@@ -30,6 +30,7 @@ const DEFAULT_MECHANICS = ["Dom", "Steve", "Jay", "Callum", "Jack"];
 const MECHANIC_DAILY_HOURS = 8;
 const MECHANIC_WEEKLY_HOURS = 40;
 const WORK_LOG_TYPE = "sales-work-log";
+const STOCK_ITEM_TYPE = "stock-item";
 
 const seedData = {
   customers: [],
@@ -46,6 +47,7 @@ let currentJobFilter = "all";
 let selectedProfitMonth = null;
 let searchTerm = "";
 let activeQuoteItems = [];
+const stockDrafts = new Map();
 let activeInvoiceId = null;
 let activeEditJobId = null;
 let calendarDate = new Date(today);
@@ -128,7 +130,7 @@ const shiftedMonthKey = (offset = 0) => {
 };
 const monthName = (value) => new Date(`${value}-01T12:00:00`).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
 const expensesTotal = (month = null) => state.expenses
-  .filter((expense) => expense.type !== WORK_LOG_TYPE && (!month || monthKey(expense.expenseDate) === month))
+  .filter((expense) => ![WORK_LOG_TYPE, STOCK_ITEM_TYPE].includes(expense.type) && (!month || monthKey(expense.expenseDate) === month))
   .reduce((total, expense) => total + Number(expense.amount || 0), 0);
 const invoiceForJob = (jobId) => state.invoices.find((invoice) => invoice.job === jobId);
 const isJobPaid = (job) => invoiceForJob(job.id)?.status === "Paid";
@@ -143,10 +145,11 @@ const paidLabourIncomeThrough = (month) => state.jobs.reduce((total, job) => {
   return total + (invoice?.status === "Paid" && monthKey(invoice.paidDate) <= month ? jobLabourTotal(job) : 0);
 }, 0);
 const expensesTotalThrough = (month) => state.expenses
-  .filter((expense) => expense.type !== WORK_LOG_TYPE && monthKey(expense.expenseDate) <= month)
+  .filter((expense) => ![WORK_LOG_TYPE, STOCK_ITEM_TYPE].includes(expense.type) && monthKey(expense.expenseDate) <= month)
   .reduce((total, expense) => total + Number(expense.amount || 0), 0);
 const profitThrough = (month) => paidLabourIncomeThrough(month) - expensesTotalThrough(month);
 const workLogs = () => state.expenses.filter((entry) => entry.type === WORK_LOG_TYPE);
+const stockItems = () => state.expenses.filter((entry) => entry.type === STOCK_ITEM_TYPE);
 
 function updateJobArchive(job) {
   const invoice = invoiceForJob(job.id);
@@ -405,11 +408,11 @@ function isAdmin() {
 }
 
 function canView(viewId) {
-  return !["profit", "userLogs"].includes(viewId) || isAdmin();
+  return !["stock", "profit", "userLogs"].includes(viewId) || isAdmin();
 }
 
 function applyRoleAccess() {
-  document.querySelectorAll('[data-view="profit"], [data-view="userLogs"]').forEach((item) => {
+  document.querySelectorAll('[data-view="stock"], [data-view="profit"], [data-view="userLogs"]').forEach((item) => {
     item.classList.toggle("hidden", !isAdmin());
   });
   document.querySelector("#workLogUserField").classList.toggle("hidden", !isAdmin());
@@ -667,7 +670,7 @@ function renderProfit() {
     return `<tr><td><strong>${quoteTitle(job)}</strong></td><td>${vehicleLabel(job.vehicle)}</td><td>${paid ? "Paid" : "Unpaid"}</td><td>${formatDate(invoice?.paidDate)}</td><td>${money(jobLabourTotal(job))}</td><td>${money(partsTotal(job.lineItems))}</td><td>${money(countedThisMonth)}</td></tr>`;
   }).join("");
   const expenseRows = state.expenses
-    .filter((expense) => expense.type !== WORK_LOG_TYPE && monthKey(expense.expenseDate) === selectedProfitMonth)
+    .filter((expense) => ![WORK_LOG_TYPE, STOCK_ITEM_TYPE].includes(expense.type) && monthKey(expense.expenseDate) === selectedProfitMonth)
     .slice()
     .sort((first, second) => String(second.expenseDate || "").localeCompare(String(first.expenseDate || "")))
     .map((expense) => `
@@ -696,6 +699,51 @@ function renderProfit() {
     <table><thead><tr><th>Date</th><th>Type</th><th>Mechanic</th><th>Description</th><th>Amount</th><th></th></tr></thead><tbody>${expenseRows || `<tr><td colspan="6">No expenses yet.</td></tr>`}</tbody></table>
     <h2>Quotes</h2>
     <table><thead><tr><th>Quote</th><th>Vehicle</th><th>Payment</th><th>Paid date</th><th>Labour</th><th>Parts</th><th>${selectedMonthName} labour counted</th></tr></thead><tbody>${jobRows || `<tr><td colspan="7">No quotes yet.</td></tr>`}</tbody></table>
+  `;
+}
+
+function renderStock() {
+  const panel = document.querySelector("#stockList");
+  if (!isAdmin()) {
+    panel.innerHTML = `<div class="empty">You do not have permission to view stock.</div>`;
+    return;
+  }
+  const activeInput = document.activeElement;
+  const editingStockAmount = panel.contains(activeInput)
+    && (activeInput?.matches("[data-stock-invested]") || activeInput?.matches("[data-stock-sold-for]"));
+  if (editingStockAmount) return;
+  const items = stockItems()
+    .filter((item) => !searchTerm || [item.partName, item.stockAmount ?? item.quantity, item.invested, item.soldFor].join(" ").toLowerCase().includes(searchTerm))
+    .slice()
+    .sort((first, second) => String(second.createdAt || "").localeCompare(String(first.createdAt || "")));
+  const stockInitialAmount = (item) => Number(item.stockAmount ?? item.quantity ?? 0);
+  const stockTotalInvested = (item) => stockInitialAmount(item) + Number(item.invested || 0);
+  const totalInvested = stockItems().reduce((total, item) => total + stockTotalInvested(item), 0);
+  const totalSold = stockItems().reduce((total, item) => total + Number(item.soldFor || 0), 0);
+  const rows = items.map((item) => {
+    const draft = stockDrafts.get(item.id) || {};
+    const investedValue = draft.invested ?? Number(item.invested || 0).toFixed(2);
+    const soldForValue = draft.soldFor ?? Number(item.soldFor || 0).toFixed(2);
+    return `
+    <tr>
+      <td><strong>${item.partName}</strong></td>
+      <td>${money(stockInitialAmount(item))}</td>
+      <td><label class="currency-input"><span>£</span><input class="table-money-input" data-stock-invested="${item.id}" type="text" inputmode="decimal" value="${investedValue}" aria-label="Amount invested for ${item.partName} in pounds" /></label></td>
+      <td><label class="currency-input"><span>£</span><input class="table-money-input" data-stock-sold-for="${item.id}" type="text" inputmode="decimal" value="${soldForValue}" aria-label="Sold for amount for ${item.partName} in pounds" /></label></td>
+      <td>${money(stockTotalInvested(item))}</td>
+      <td>${money(Number(item.soldFor || 0) - stockTotalInvested(item))}</td>
+      <td><div class="row-actions"><button class="small-button" data-stock-save="${item.id}">Save</button><button class="small-button" data-stock-delete="${item.id}">Delete</button></div></td>
+    </tr>
+  `;
+  }).join("");
+  panel.innerHTML = `
+    <h2>Stock</h2>
+    <div class="profit-grid">
+      <div class="profit-box"><span>Total invested</span><strong>${money(totalInvested)}</strong></div>
+      <div class="profit-box"><span>Total sold for</span><strong>${money(totalSold)}</strong></div>
+      <div class="profit-box"><span>Profit</span><strong>${money(totalSold - totalInvested)}</strong></div>
+    </div>
+    <table><thead><tr><th>Part bought</th><th>Amount</th><th>Additional invested</th><th>Sold for</th><th>Total invested</th><th>Profit</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="7">No stock added yet.</td></tr>`}</tbody></table>
   `;
 }
 function canManageWorkLog(entry) {
@@ -1406,6 +1454,7 @@ function render() {
   renderVehicles();
   renderInvoices();
   renderWorkLogs();
+  renderStock();
   renderProfit();
   renderUserLogs();
 }
@@ -1417,6 +1466,17 @@ document.querySelectorAll("[data-view], [data-view-link]").forEach((button) => {
 document.querySelector("#globalSearch").addEventListener("input", (event) => {
   searchTerm = event.target.value.trim().toLowerCase();
   render();
+});
+
+document.addEventListener("input", (event) => {
+  const investedId = event.target.dataset.stockInvested;
+  const soldForId = event.target.dataset.stockSoldFor;
+  const stockId = investedId || soldForId;
+  if (!stockId) return;
+  const draft = stockDrafts.get(stockId) || {};
+  if (investedId) draft.invested = event.target.value;
+  if (soldForId) draft.soldFor = event.target.value;
+  stockDrafts.set(stockId, draft);
 });
 
 document.querySelector("#workLogMonth").addEventListener("change", renderWorkLogs);
@@ -1701,6 +1761,30 @@ document.querySelector("#expenseForm").addEventListener("submit", (event) => {
   render();
 });
 
+document.querySelector("#stockForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!isAdmin()) return;
+  const form = new FormData(event.currentTarget);
+  const stockAmount = Number(String(form.get("stockAmount") || "").replace(/[£,\s]/g, ""));
+  if (!Number.isFinite(stockAmount)) {
+    window.alert("Enter a valid pound amount.");
+    return;
+  }
+  state.expenses.push({
+    id: makeId("s"),
+    type: STOCK_ITEM_TYPE,
+    partName: String(form.get("partName") || "").trim(),
+    stockAmount,
+    invested: 0,
+    soldFor: 0,
+    amount: 0,
+    createdAt: new Date().toISOString()
+  });
+  event.currentTarget.reset();
+  save();
+  render();
+});
+
 document.querySelector("#workLogForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
@@ -1823,6 +1907,39 @@ document.addEventListener("click", (event) => {
     if (!window.confirm(`Delete this work log for ${entry.userEmail || "this user"}?`)) return;
     state.expenses = state.expenses.filter((item) => item.id !== entry.id);
     if (document.querySelector('#workLogForm [name="workLogId"]').value === entry.id) resetWorkLogForm();
+    save();
+    render();
+    return;
+  }
+
+  const stockDeleteId = event.target.closest("[data-stock-delete]")?.dataset.stockDelete;
+  if (stockDeleteId) {
+    if (!isAdmin()) return;
+    const item = stockItems().find((entry) => entry.id === stockDeleteId);
+    if (!item || !window.confirm(`Delete ${item.partName} from stock?`)) return;
+    state.expenses = state.expenses.filter((entry) => entry.id !== stockDeleteId);
+    stockDrafts.delete(stockDeleteId);
+    save();
+    render();
+    return;
+  }
+
+  const stockSaveId = event.target.closest("[data-stock-save]")?.dataset.stockSave;
+  if (stockSaveId) {
+    if (!isAdmin()) return;
+    const item = stockItems().find((entry) => entry.id === stockSaveId);
+    if (!item) return;
+    const investedInput = document.querySelector(`[data-stock-invested="${stockSaveId}"]`);
+    const soldForInput = document.querySelector(`[data-stock-sold-for="${stockSaveId}"]`);
+    const enteredInvested = Number(String(investedInput?.value || 0).replace(/[£,\s]/g, ""));
+    const enteredSoldFor = Number(String(soldForInput?.value || 0).replace(/[£,\s]/g, ""));
+    if (!Number.isFinite(enteredInvested) || !Number.isFinite(enteredSoldFor)) {
+      window.alert("Enter valid pound amounts for invested and sold for.");
+      return;
+    }
+    item.invested = enteredInvested;
+    item.soldFor = enteredSoldFor;
+    stockDrafts.delete(stockSaveId);
     save();
     render();
     return;

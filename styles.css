@@ -124,6 +124,20 @@ textarea {
   color: #fff;
 }
 
+.table-money-input {
+  width: 90px;
+  min-width: 90px;
+  padding: 8px;
+}
+
+.currency-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .main {
   padding: 26px;
   min-width: 0;

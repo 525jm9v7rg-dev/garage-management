@@ -40,6 +40,7 @@
           <button class="nav-item" data-view="vehicles">Vehicles</button>
           <button class="nav-item" data-view="invoices">Invoices</button>
           <button class="nav-item" data-view="workLogs">Work Log</button>
+          <button class="nav-item" data-view="stock">Stock</button>
           <button class="nav-item" data-view="profit">Profit</button>
           <button class="nav-item" data-view="userLogs">User Logs</button>
         </nav>
@@ -169,6 +170,20 @@
               </div>
             </form>
             <div id="workLogsList" class="table-panel"></div>
+          </div>
+        </section>
+
+        <section id="stock" class="view">
+          <div class="two-column">
+            <form id="stockForm" class="form-panel">
+              <h2>Add stock</h2>
+              <label>Part bought<input required name="partName" placeholder="Clutch" /></label>
+              <label>Amount
+                <span class="currency-input"><span>£</span><input required name="stockAmount" type="text" inputmode="decimal" placeholder="300.00" /></span>
+              </label>
+              <button class="primary-button" type="submit">Add stock</button>
+            </form>
+            <div id="stockList" class="table-panel"></div>
           </div>
         </section>
 
