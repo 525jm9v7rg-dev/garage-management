@@ -56,6 +56,8 @@ let currentUser = null;
 let currentProfile = null;
 let loginLogs = [];
 let userProfiles = [];
+let jobAuditLogs = [];
+let activeHistoryJobId = null;
 let remoteReady = false;
 let syncingRemote = false;
 let remoteSavePending = false;
@@ -72,6 +74,7 @@ const navItems = document.querySelectorAll(".nav-item");
 const pageTitle = document.querySelector("#pageTitle");
 const jobDialog = document.querySelector("#jobDialog");
 const invoiceDialog = document.querySelector("#invoiceDialog");
+const jobHistoryDialog = document.querySelector("#jobHistoryDialog");
 const loginScreen = document.querySelector("#loginScreen");
 const appShell = document.querySelector("#appShell");
 const loginMessage = document.querySelector("#loginMessage");
@@ -408,11 +411,11 @@ function isAdmin() {
 }
 
 function canView(viewId) {
-  return !["stock", "profit", "userLogs"].includes(viewId) || isAdmin();
+  return !["stock", "profit", "jobHistory", "userLogs"].includes(viewId) || isAdmin();
 }
 
 function applyRoleAccess() {
-  document.querySelectorAll('[data-view="stock"], [data-view="profit"], [data-view="userLogs"]').forEach((item) => {
+  document.querySelectorAll('[data-view="stock"], [data-view="profit"], [data-view="jobHistory"], [data-view="userLogs"]').forEach((item) => {
     item.classList.toggle("hidden", !isAdmin());
   });
   document.querySelector("#workLogUserField").classList.toggle("hidden", !isAdmin());
@@ -430,8 +433,9 @@ function setView(viewId) {
   if (viewId !== "profit") profitUnlocked = false;
   views.forEach((view) => view.classList.toggle("active-view", view.id === viewId));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === viewId));
-  pageTitle.textContent = viewId === "jobs" ? "Quotes" : viewId === "userLogs" ? "User Logs" : viewId === "workLogs" ? "Work Log" : viewId[0].toUpperCase() + viewId.slice(1);
+  pageTitle.textContent = viewId === "jobs" ? "Quotes" : viewId === "jobHistory" ? "Job History" : viewId === "userLogs" ? "User Logs" : viewId === "workLogs" ? "Work Log" : viewId[0].toUpperCase() + viewId.slice(1);
   render();
+  if (viewId === "jobHistory") refreshJobAuditLogs();
   if (viewId === "userLogs") refreshAdminLogs();
 }
 
@@ -516,6 +520,7 @@ function renderJobs() {
             <span class="job-note">${job.notes || "No notes"}</span>
           </div>
           <div class="row-actions">
+            <button class="small-button" type="button" data-job-history="${job.id}">History</button>
             ${editQuoteAction}
             ${collectedInvoiceAction}
             ${archivedActions}
@@ -879,6 +884,69 @@ function renderUserLogs() {
     <h2>User logs</h2>
     <table><thead><tr><th>User</th><th>Action</th><th>Time</th></tr></thead><tbody>${rows || `<tr><td colspan="3">No user logs yet.</td></tr>`}</tbody></table>
   `;
+}
+
+function auditValue(value) {
+  if (value === null || value === undefined || value === "") return "None";
+  if (Array.isArray(value)) return `${value.length} quote line${value.length === 1 ? "" : "s"}`;
+  if (typeof value === "object") return JSON.stringify(value);
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return String(value);
+}
+
+function auditFieldLabel(field) {
+  const labels = {
+    due: "Job date",
+    type: "Quote",
+    notes: "Notes",
+    status: "Status",
+    vehicle: "Vehicle",
+    mechanic: "Mechanic",
+    lineItems: "Quote lines",
+    readyDate: "Ready date",
+    estimatedHours: "Estimated hours",
+    archived: "Archived",
+    archivedAt: "Archived date"
+  };
+  return labels[field] || field.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function showJobHistory(jobId) {
+  activeHistoryJobId = jobId;
+  const job = byId("jobs", jobId);
+  const deletedSnapshot = jobAuditLogs.find((entry) => entry.job_id === jobId)?.old_data;
+  const vehicleId = job?.vehicle || deletedSnapshot?.vehicle;
+  const historyTitle = document.querySelector("#jobHistoryTitle");
+  historyTitle.textContent = `Job history — ${vehicleId ? vehicleRegistration(vehicleId) : "Deleted job"}`;
+  historyTitle.style.color = "#17202a";
+  const entries = jobAuditLogs.filter((entry) => entry.job_id === jobId);
+  document.querySelector("#jobHistoryContent").innerHTML = entries.length ? entries.map((entry) => {
+    const changed = entry.changed_fields || {};
+    const action = entry.action || "updated";
+    const changedEntries = Object.entries(changed);
+    const detailRows = action === "updated" && changedEntries.length
+      ? changedEntries.map(([field, values]) => `<li style="color:#17202a"><strong style="color:#17202a">${auditFieldLabel(field)}:</strong> ${auditValue(values?.from)} → ${auditValue(values?.to)}</li>`).join("")
+      : `<li style="color:#17202a">${action === "created" ? "Job created" : action === "deleted" ? "Job deleted" : "Job details updated"}</li>`;
+    const timestamp = new Date(entry.changed_at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
+    const user = String(entry.changed_by_email || "Unknown user").trim() || "Unknown user";
+    return `<article class="history-entry" style="color:#17202a;background:#fff"><div class="history-entry-header" style="color:#17202a"><strong style="color:#17202a">${user}</strong><span style="color:#4b5563">${timestamp}</span></div><div style="margin:8px 0;color:#17202a"><strong style="color:#17202a;text-transform:capitalize">${action}</strong> this job</div><ul style="color:#17202a">${detailRows}</ul></article>`;
+  }).join("") : `<div class="empty">No recorded history yet. Changes will appear after the database audit setup is installed.</div>`;
+  if (!jobHistoryDialog.open) jobHistoryDialog.showModal();
+}
+
+function renderJobHistoryList() {
+  const panel = document.querySelector("#jobHistoryList");
+  if (!isAdmin()) {
+    panel.innerHTML = `<div class="empty">You do not have permission to view all job history.</div>`;
+    return;
+  }
+  const rows = jobAuditLogs.map((entry) => {
+    const snapshot = entry.new_data || entry.old_data || {};
+    const vehicle = snapshot.vehicle ? byId("vehicles", snapshot.vehicle) : null;
+    const jobName = snapshot.type || entry.job_id;
+    return `<tr><td>${entry.changed_at ? new Date(entry.changed_at).toLocaleString("en-GB") : "-"}</td><td><strong>${vehicle?.plate || jobName}</strong></td><td>${entry.changed_by_email || "Unknown user"}</td><td>${entry.action}</td><td><button class="small-button" data-job-history="${entry.job_id}">View changes</button></td></tr>`;
+  }).join("");
+  panel.innerHTML = `<h2>All job history</h2><table><thead><tr><th>Time</th><th>Job</th><th>User</th><th>Action</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="5">No job history recorded yet.</td></tr>`}</tbody></table>`;
 }
 
 function renderSelects() {
@@ -1389,6 +1457,7 @@ function startLiveSync() {
   remotePollTimer = window.setInterval(() => {
     queueRemoteReload();
     refreshAdminLogs();
+    if (activeHistoryJobId || document.querySelector("#jobHistory")?.classList.contains("active-view")) refreshJobAuditLogs();
   }, 3000);
 }
 
@@ -1448,6 +1517,27 @@ async function loadLoginLogs() {
   loginLogs = data || [];
 }
 
+async function loadJobAuditLogs() {
+  jobAuditLogs = [];
+  if (!currentUser || !supabaseClient) return;
+  const { data, error } = await supabaseClient
+    .from("job_audit_logs")
+    .select("id,job_id,action,changed_fields,old_data,new_data,changed_by,changed_by_email,changed_at")
+    .order("changed_at", { ascending: false })
+    .limit(2000);
+  if (error) {
+    console.warn("Job audit history is unavailable. Run supabase-job-audit.sql in Supabase.", error);
+    return;
+  }
+  jobAuditLogs = data || [];
+}
+
+async function refreshJobAuditLogs() {
+  await loadJobAuditLogs();
+  renderJobHistoryList();
+  if (activeHistoryJobId && jobHistoryDialog.open) showJobHistory(activeHistoryJobId);
+}
+
 async function refreshAdminLogs() {
   if (!currentUser || !isAdmin() || !supabaseClient) return;
   await loadLoginLogs();
@@ -1472,6 +1562,7 @@ async function handleSignedIn(user) {
   await recordLoginAction("login", user);
   await loadStateFromSupabase();
   await loadLoginLogs();
+  await loadJobAuditLogs();
   render();
   resetWorkLogForm();
   document.querySelector('#expenseForm [name="expenseDate"]').value = dateKey(new Date());
@@ -1518,6 +1609,7 @@ function render() {
   renderWorkLogs();
   renderStock();
   renderProfit();
+  renderJobHistoryList();
   renderUserLogs();
 }
 
@@ -1593,6 +1685,10 @@ document.querySelector("#nextMonthBtn").addEventListener("click", () => {
 
 document.querySelector("#closeDialog").addEventListener("click", () => jobDialog.close());
 document.querySelector("#closeInvoiceDialog").addEventListener("click", () => invoiceDialog.close());
+document.querySelector("#closeJobHistoryDialog").addEventListener("click", () => jobHistoryDialog.close());
+jobHistoryDialog.addEventListener("close", () => {
+  activeHistoryJobId = null;
+});
 
 document.querySelector("#printInvoiceBtn").addEventListener("click", () => {
   document.body.classList.add("printing-invoice");
@@ -1942,6 +2038,12 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const historyJobId = event.target.closest("[data-job-history]")?.dataset.jobHistory;
+  if (historyJobId) {
+    loadJobAuditLogs().then(() => showJobHistory(historyJobId));
+    return;
+  }
+
   const profitMonth = event.target.closest("[data-profit-month]")?.dataset.profitMonth;
   if (profitMonth) {
     selectedProfitMonth = profitMonth;

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OG Autos Workshop Manager</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=20260815-2" />
   </head>
   <body>
     <section id="loginScreen" class="login-screen">
@@ -42,6 +42,7 @@
           <button class="nav-item" data-view="workLogs">Work Log</button>
           <button class="nav-item" data-view="stock">Stock</button>
           <button class="nav-item" data-view="profit">Profit</button>
+          <button class="nav-item" data-view="jobHistory">Job History</button>
           <button class="nav-item" data-view="userLogs">User Logs</button>
         </nav>
       </aside>
@@ -215,6 +216,10 @@
         <section id="userLogs" class="view">
           <div id="userLogsList" class="table-panel full"></div>
         </section>
+
+        <section id="jobHistory" class="view">
+          <div id="jobHistoryList" class="table-panel full"></div>
+        </section>
       </main>
     </div>
 
@@ -316,9 +321,19 @@
       </div>
     </dialog>
 
+    <dialog id="jobHistoryDialog">
+      <div class="invoice-dialog history-dialog">
+        <div class="dialog-header">
+          <h2 id="jobHistoryTitle">Job history</h2>
+          <button type="button" class="icon-button" id="closeJobHistoryDialog" aria-label="Close">x</button>
+        </div>
+        <div id="jobHistoryContent" class="table-panel full"></div>
+      </div>
+    </dialog>
+
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-    <script src="app.js"></script>
+    <script src="app.js?v=20260815-2"></script>
   </body>
 </html>

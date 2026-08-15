@@ -149,6 +149,51 @@ textarea {
   z-index: -1;
 }
 
+.history-dialog {
+  width: min(900px, 92vw);
+  color: #17202a;
+  background: #fff;
+}
+
+#jobHistoryDialog,
+#jobHistoryDialog h2,
+#jobHistoryDialog strong,
+#jobHistoryDialog li {
+  color: #17202a !important;
+}
+
+.history-entry {
+  margin-bottom: 12px;
+  padding: 14px;
+  border: 1px solid #d8dee8;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.history-entry-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.history-entry-header span {
+  color: #4b5563;
+}
+
+#jobHistoryDialog .history-entry .badge {
+  color: #334155 !important;
+  background: #e5e7eb;
+  text-transform: capitalize;
+}
+
+.history-entry ul {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  color: #17202a;
+  line-height: 1.6;
+}
+
 .main {
   padding: 26px;
   min-width: 0;
