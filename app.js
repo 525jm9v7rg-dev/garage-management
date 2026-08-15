@@ -1087,18 +1087,80 @@ function showInvoice(invoiceId) {
   invoiceDialog.showModal();
 }
 
-function emailInvoice(invoiceId) {
+async function createInvoicePdf(invoiceId) {
+  if (!window.jspdf?.jsPDF || !window.html2canvas) throw new Error("The PDF generator has not loaded. Refresh and try again.");
+  const { invoice, vehicle } = getInvoiceDetails(invoiceId);
+  if (!invoice) throw new Error("Invoice not found.");
+  const source = document.createElement("div");
+  source.className = "invoice-document invoice-pdf-source";
+  source.innerHTML = invoiceHtml(invoiceId);
+  document.body.appendChild(source);
+  try {
+    const pdf = new window.jspdf.jsPDF({ unit: "pt", format: "a4", orientation: "portrait" });
+    await new Promise((resolve) => {
+      pdf.html(source, {
+        callback: resolve,
+        x: 28,
+        y: 28,
+        width: 539,
+        windowWidth: 760,
+        autoPaging: "text",
+        html2canvas: { scale: 1, backgroundColor: "#ffffff" }
+      });
+    });
+    const registration = String(vehicle?.plate || "vehicle").replace(/[^a-z0-9]/gi, "").toUpperCase();
+    const filename = `Invoice-${invoice.id.toUpperCase()}-${registration}.pdf`;
+    return { blob: pdf.output("blob"), filename };
+  } finally {
+    source.remove();
+  }
+}
+
+async function emailInvoice(invoiceId) {
   const { invoice, job, vehicle, customer } = getInvoiceDetails(invoiceId);
   if (!invoice || !job) return;
   const senderName = invoiceBusinessName(invoice);
-  const subject = encodeURIComponent(`Invoice ${invoice.id.toUpperCase()} from ${senderName}`);
+  const subjectText = `Invoice ${invoice.id.toUpperCase()} from ${senderName}`;
+  const subject = encodeURIComponent(subjectText);
   const vatText = isVatInvoice(invoice)
     ? `\nVAT No: ${business.vatNumber}\nNet total: ${money(invoiceSubtotal(invoice))}\nTotal VAT 20%: ${money(invoiceVatAmount(invoice))}`
     : "";
-  const body = encodeURIComponent(
-    `Hi ${customer?.name || ""},\n\nPlease find your invoice details below.\n\nInvoice: ${invoice.id.toUpperCase()}\nBusiness: ${senderName}\nAddress: ${business.address}\nCustomer address: ${customer?.address || "-"}\nVehicle: ${vehicle ? `${vehicle.plate} - ${vehicle.model}` : "-"}\nQuote: ${quoteTitle(job)}\nLabour: ${money(jobLabourTotal(job))}\nParts: ${money(partsTotal(job.lineItems))}${vatText}\nGrand total: ${money(invoiceTotal(invoice))}\nDue: ${formatDate(invoice.due)}\n\nThanks,\n${senderName}`
-  );
-  window.location.href = `mailto:${customer?.email || ""}?subject=${subject}&body=${body}`;
+  const bodyText =
+    `Hi ${customer?.name || ""},\n\nPlease find your invoice details below.\n\nInvoice: ${invoice.id.toUpperCase()}\nBusiness: ${senderName}\nAddress: ${business.address}\nCustomer address: ${customer?.address || "-"}\nVehicle: ${vehicle ? `${vehicle.plate} - ${vehicle.model}` : "-"}\nQuote: ${quoteTitle(job)}\nLabour: ${money(jobLabourTotal(job))}\nParts: ${money(partsTotal(job.lineItems))}${vatText}\nGrand total: ${money(invoiceTotal(invoice))}\nDue: ${formatDate(invoice.due)}\n\nThanks,\n${senderName}`;
+  const body = encodeURIComponent(bodyText);
+  const emailButton = document.querySelector("#emailInvoiceBtn");
+  const originalButtonText = emailButton?.textContent || "Email invoice";
+  if (emailButton) {
+    emailButton.disabled = true;
+    emailButton.textContent = "Creating PDF...";
+  }
+  try {
+    const { blob, filename } = await createInvoicePdf(invoiceId);
+    const file = new File([blob], filename, { type: "application/pdf" });
+    if (navigator.share && navigator.canShare?.({ files: [file] })) {
+      await navigator.share({
+        files: [file],
+        title: subjectText,
+        text: `${bodyText}\n\nSend to: ${customer?.email || "customer"}`
+      });
+      return;
+    }
+    const downloadUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = downloadUrl;
+    link.download = filename;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 30000);
+    window.alert(`${filename} has been downloaded. Your email window will now open; attach the downloaded PDF before sending.`);
+    window.location.href = `mailto:${customer?.email || ""}?subject=${subject}&body=${body}`;
+  } catch (error) {
+    if (error?.name !== "AbortError") window.alert(error.message || "Could not create the invoice PDF.");
+  } finally {
+    if (emailButton) {
+      emailButton.disabled = false;
+      emailButton.textContent = originalButtonText;
+    }
+  }
 }
 
 function exportData() {

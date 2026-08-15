@@ -138,6 +138,17 @@ textarea {
   white-space: nowrap;
 }
 
+.invoice-pdf-source {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 760px;
+  padding: 24px;
+  background: #fff;
+  color: #111827;
+  z-index: -1;
+}
+
 .main {
   padding: 26px;
   min-width: 0;
