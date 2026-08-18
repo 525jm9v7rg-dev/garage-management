@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OG Autos Workshop Manager</title>
-    <link rel="stylesheet" href="styles.css?v=20260815-2" />
+    <link rel="stylesheet" href="styles.css?v=20260818-1" />
   </head>
   <body>
     <section id="loginScreen" class="login-screen">
@@ -303,6 +303,7 @@
         <label class="availability-from">Find availability from<input id="availabilityFrom" type="date" /></label>
         <div id="mechanicAvailability" class="mechanic-availability" aria-live="polite"></div>
         <label>Notes<textarea name="notes" placeholder="Customer concerns, diagnostics, parts needed..."></textarea></label>
+        <label>Advisories<textarea name="advisories" placeholder="Recommended future work, warnings or items to monitor..."></textarea></label>
         <button id="saveJobBtn" class="primary-button" type="submit">Create quote</button>
       </form>
     </dialog>
@@ -314,6 +315,10 @@
           <button type="button" class="icon-button" id="closeInvoiceDialog" aria-label="Close">x</button>
         </div>
         <div id="invoiceContent" class="invoice-document"></div>
+        <div class="invoice-advisory-editor no-print">
+          <label>Advisories<textarea id="invoiceAdvisoriesInput" placeholder="Recommended future work, warnings or items to monitor..."></textarea></label>
+          <button id="saveInvoiceAdvisoriesBtn" class="ghost-button" type="button">Save advisories</button>
+        </div>
         <div class="invoice-actions no-print">
           <button id="printInvoiceBtn" class="primary-button" type="button">Print</button>
           <button id="emailInvoiceBtn" class="ghost-button" type="button">Email invoice</button>
@@ -334,6 +339,6 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-    <script src="app.js?v=20260815-2"></script>
+    <script src="app.js?v=20260818-1"></script>
   </body>
 </html>

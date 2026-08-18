@@ -399,7 +399,7 @@ function jobSearchText(job) {
   const vehicle = byId("vehicles", job.vehicle);
   const owner = vehicle ? byId("customers", vehicle.owner) : null;
   const quoteItems = (job.lineItems || []).map((item) => item.name).join(" ");
-  return [quoteTitle(job), job.status, job.mechanic, job.notes, vehicle?.plate, vehicle?.model, owner?.name, quoteItems].join(" ").toLowerCase();
+  return [quoteTitle(job), job.status, job.mechanic, job.notes, job.advisories, vehicle?.plate, vehicle?.model, owner?.name, quoteItems].join(" ").toLowerCase();
 }
 
 function currentRole() {
@@ -518,6 +518,7 @@ function renderJobs() {
             <span class="parts-status">Parts status: ${partsStatusSummary(job)}</span>
             <span>Total quote: ${money(jobTotal(job))}</span>
             <span class="job-note">${job.notes || "No notes"}</span>
+            ${job.advisories ? `<span class="job-advisory">Advisories: ${job.advisories}</span>` : ""}
           </div>
           <div class="row-actions">
             <button class="small-button" type="button" data-job-history="${job.id}">History</button>
@@ -899,6 +900,7 @@ function auditFieldLabel(field) {
     due: "Job date",
     type: "Quote",
     notes: "Notes",
+    advisories: "Advisories",
     status: "Status",
     vehicle: "Vehicle",
     mechanic: "Mechanic",
@@ -1071,6 +1073,7 @@ function openEditQuoteDialog(jobId) {
   document.querySelector('#jobForm input[name="estimatedHours"]').value = jobEstimatedHours(job);
   document.querySelector('#jobForm select[name="status"]').value = job.status;
   document.querySelector('#jobForm textarea[name="notes"]').value = job.notes || "";
+  document.querySelector('#jobForm textarea[name="advisories"]').value = job.advisories || "";
   activeQuoteItems = (job.lineItems || []).map((item) => ({ ...item }));
   setVehicleMode("existing");
   renderQuoteBuilder();
@@ -1140,6 +1143,10 @@ function invoiceHtml(invoiceId) {
         <tr><th colspan="${totalColspan}">Grand total</th><th>${money(invoiceTotal(invoice))}</th></tr>
       </tfoot>
     </table>
+    <div class="invoice-advisories">
+      <strong>Advisories</strong>
+      <div>${job.advisories || "No advisories recorded."}</div>
+    </div>
     <div class="invoice-bank-details">
       <strong>Bank Details</strong><br>
       ${vatEnabled ? business.vatBankName : business.bankName}<br>
@@ -1152,6 +1159,8 @@ function invoiceHtml(invoiceId) {
 function showInvoice(invoiceId) {
   activeInvoiceId = invoiceId;
   document.querySelector("#invoiceContent").innerHTML = invoiceHtml(invoiceId);
+  const { job } = getInvoiceDetails(invoiceId);
+  document.querySelector("#invoiceAdvisoriesInput").value = job?.advisories || "";
   invoiceDialog.showModal();
 }
 
@@ -1194,7 +1203,7 @@ async function emailInvoice(invoiceId) {
     ? `\nVAT No: ${business.vatNumber}\nNet total: ${money(invoiceSubtotal(invoice))}\nTotal VAT 20%: ${money(invoiceVatAmount(invoice))}`
     : "";
   const bodyText =
-    `Hi ${customer?.name || ""},\n\nPlease find your invoice details below.\n\nInvoice: ${invoice.id.toUpperCase()}\nBusiness: ${senderName}\nAddress: ${business.address}\nCustomer address: ${customer?.address || "-"}\nVehicle: ${vehicle ? `${vehicle.plate} - ${vehicle.model}` : "-"}\nQuote: ${quoteTitle(job)}\nLabour: ${money(jobLabourTotal(job))}\nParts: ${money(partsTotal(job.lineItems))}${vatText}\nGrand total: ${money(invoiceTotal(invoice))}\nDue: ${formatDate(invoice.due)}\n\nThanks,\n${senderName}`;
+    `Hi ${customer?.name || ""},\n\nPlease find your invoice details below.\n\nInvoice: ${invoice.id.toUpperCase()}\nBusiness: ${senderName}\nAddress: ${business.address}\nCustomer address: ${customer?.address || "-"}\nVehicle: ${vehicle ? `${vehicle.plate} - ${vehicle.model}` : "-"}\nQuote: ${quoteTitle(job)}\nLabour: ${money(jobLabourTotal(job))}\nParts: ${money(partsTotal(job.lineItems))}${vatText}\nGrand total: ${money(invoiceTotal(invoice))}\nDue: ${formatDate(invoice.due)}\nAdvisories: ${job.advisories || "None recorded"}\n\nThanks,\n${senderName}`;
   const body = encodeURIComponent(bodyText);
   const emailButton = document.querySelector("#emailInvoiceBtn");
   const originalButtonText = emailButton?.textContent || "Email invoice";
@@ -1700,6 +1709,16 @@ document.querySelector("#emailInvoiceBtn").addEventListener("click", () => {
   if (activeInvoiceId) emailInvoice(activeInvoiceId);
 });
 
+document.querySelector("#saveInvoiceAdvisoriesBtn").addEventListener("click", () => {
+  if (!activeInvoiceId) return;
+  const { job } = getInvoiceDetails(activeInvoiceId);
+  if (!job) return;
+  job.advisories = document.querySelector("#invoiceAdvisoriesInput").value.trim();
+  save();
+  document.querySelector("#invoiceContent").innerHTML = invoiceHtml(activeInvoiceId);
+  render();
+});
+
 document.querySelectorAll('#jobForm input[name="vehicleMode"]').forEach((radio) => {
   radio.addEventListener("change", (event) => {
     setVehicleMode(event.target.value);
@@ -1807,7 +1826,8 @@ document.querySelector("#jobForm").addEventListener("submit", async (event) => {
     mechanic,
     estimatedHours,
     status: form.get("status"),
-    notes: form.get("notes")
+    notes: form.get("notes"),
+    advisories: form.get("advisories")
   });
   if (job.status === "Ready" && previousStatus !== "Ready") job.readyDate = dateKey(new Date());
   if (job.status === "Collected" && !job.readyDate) job.readyDate = dateKey(new Date());
