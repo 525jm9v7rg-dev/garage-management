@@ -491,6 +491,7 @@ function renderJobs() {
   document.querySelector("#jobsGrid").innerHTML = filtered.length
     ? filtered.map((job) => {
       const invoice = invoiceForJob(job.id);
+      const customer = customerForJob(job);
       const collectedInvoiceAction = !job.archived && job.status === "Collected" && invoice
         ? `<button class="small-button payment-button ${invoice.status === "Paid" ? "payment-recorded" : "payment-outstanding"}" type="button" data-invoice-toggle="${invoice.id}">${invoice.status === "Paid" ? "Paid" : "Not Paid"}</button>`
         : "";
@@ -505,6 +506,7 @@ function renderJobs() {
           <div class="job-card-header">
             <div>
               <h3>${vehicleRegistration(job.vehicle)}</h3>
+              <strong class="job-customer-name">${customer?.name || "Unknown customer"}</strong>
               <span class="muted">${quoteTitle(job)} - ${byId("vehicles", job.vehicle)?.model || "Unknown model"}</span>
             </div>
             ${statusBadge(job.archived ? "Archived" : job.status)}
