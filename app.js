@@ -509,8 +509,9 @@ function renderJobs() {
               <strong class="job-customer-name">${customer?.name || "Unknown customer"}</strong>
               <span class="muted">${quoteTitle(job)} - ${byId("vehicles", job.vehicle)?.model || "Unknown model"}</span>
             </div>
-            ${statusBadge(job.archived ? "Archived" : job.status)}
+            ${job.archived ? "" : `<button class="job-delete-x" type="button" data-job-delete="${job.id}" aria-label="Delete ${vehicleRegistration(job.vehicle)} job" title="Delete job">×</button>`}
           </div>
+          <div class="job-card-status">${statusBadge(job.archived ? "Archived" : job.status)}</div>
           <div class="job-meta">
             <span>Job date: ${formatDate(job.due)}</span>
             <span>Mechanic: ${job.mechanic || "Unassigned"}</span>
@@ -527,7 +528,6 @@ function renderJobs() {
             ${editQuoteAction}
             ${collectedInvoiceAction}
             ${archivedActions}
-            ${job.archived ? "" : `<button class="small-button danger-button" type="button" data-job-delete="${job.id}">Delete job</button>`}
           </div>
           ${job.archived ? `<div class="muted">Paid ${formatDate(invoice?.paidDate)} · Archived ${formatDate(job.archivedAt)}</div>` : `<label>Mechanic
             <select data-job-mechanic="${job.id}">
@@ -1175,21 +1175,33 @@ async function createInvoicePdf(invoiceId) {
   source.innerHTML = invoiceHtml(invoiceId);
   document.body.appendChild(source);
   try {
-    const pdf = new window.jspdf.jsPDF({ unit: "pt", format: "a4", orientation: "portrait" });
-    await new Promise((resolve) => {
-      pdf.html(source, {
-        callback: resolve,
-        x: 28,
-        y: 28,
-        width: 539,
-        windowWidth: 760,
-        autoPaging: "text",
-        html2canvas: { scale: 1, backgroundColor: "#ffffff" }
-      });
+    if (document.fonts?.ready) await document.fonts.ready;
+    const canvas = await window.html2canvas(source, {
+      scale: 2,
+      backgroundColor: "#ffffff",
+      useCORS: true,
+      logging: false
     });
+    if (!canvas.width || !canvas.height) throw new Error("The invoice could not be rendered.");
+    const pdf = new window.jspdf.jsPDF({ unit: "pt", format: "a4", orientation: "portrait" });
+    const margin = 28;
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const printableWidth = pageWidth - margin * 2;
+    const printableHeight = pageHeight - margin * 2;
+    const renderedHeight = canvas.height * printableWidth / canvas.width;
+    const imageData = canvas.toDataURL("image/jpeg", 0.98);
+    let offset = 0;
+    while (offset < renderedHeight) {
+      if (offset > 0) pdf.addPage();
+      pdf.addImage(imageData, "JPEG", margin, margin - offset, printableWidth, renderedHeight, undefined, "FAST");
+      offset += printableHeight;
+    }
     const registration = String(vehicle?.plate || "vehicle").replace(/[^a-z0-9]/gi, "").toUpperCase();
     const filename = `Invoice-${invoice.id.toUpperCase()}-${registration}.pdf`;
-    return { blob: pdf.output("blob"), filename };
+    const blob = pdf.output("blob");
+    if (blob.size < 1000) throw new Error("The generated invoice PDF was empty.");
+    return { blob, filename };
   } finally {
     source.remove();
   }
