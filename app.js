@@ -1398,20 +1398,26 @@ async function loadStateFromSupabase({ pushLocalWhenEmpty = true, replaceWhenEmp
 
 async function saveTableRows(table) {
   const rows = state[table].map((item) => ({ id: item.id, data: item }));
-  const { data: existing, error: selectError } = await supabaseClient.from(table).select("id");
-  if (selectError) throw selectError;
-
-  const nextIds = new Set(rows.map((row) => row.id));
-  const deleteIds = (existing || []).map((row) => row.id).filter((id) => !nextIds.has(id));
-  if (deleteIds.length) {
-    const { error } = await supabaseClient.from(table).delete().in("id", deleteIds);
-    if (error) throw error;
-  }
-
   if (rows.length) {
     const { error } = await supabaseClient.from(table).upsert(rows, { onConflict: "id" });
     if (error) throw error;
   }
+}
+
+async function deleteRemoteRecords(table, ids) {
+  const recordIds = [...new Set((Array.isArray(ids) ? ids : [ids]).filter(Boolean))];
+  if (!supabaseClient || !recordIds.length) return;
+  const { error } = await withTimeout(
+    supabaseClient.from(table).delete().in("id", recordIds),
+    `Deleting ${table} from the cloud timed out.`
+  );
+  if (error) throw error;
+  await broadcastRemoteChange();
+}
+
+function reportRemoteDeleteFailure(error) {
+  console.error("Cloud deletion failed", error);
+  window.alert("The item was removed on this device, but could not be deleted from the cloud. If it reappears, try deleting it again.");
 }
 
 async function saveRemoteRecord(table, item) {
@@ -1883,9 +1889,11 @@ document.querySelector("#jobForm").addEventListener("submit", async (event) => {
   setView("jobs");
 
   let syncDelayed = false;
+  remoteSavePending = true;
   try {
     for (const [table, record] of remoteRecords) await saveRemoteRecord(table, record);
     await broadcastRemoteChange();
+    remoteSavePending = false;
   } catch (error) {
     syncDelayed = true;
     console.error("Quote direct save failed", error);
@@ -2107,6 +2115,7 @@ document.addEventListener("click", (event) => {
     if (!entry || !canManageWorkLog(entry)) return;
     if (!window.confirm(`Delete this work log for ${entry.userEmail || "this user"}?`)) return;
     state.expenses = state.expenses.filter((item) => item.id !== entry.id);
+    deleteRemoteRecords("expenses", entry.id).catch(reportRemoteDeleteFailure);
     if (document.querySelector('#workLogForm [name="workLogId"]').value === entry.id) resetWorkLogForm();
     save();
     render();
@@ -2119,6 +2128,7 @@ document.addEventListener("click", (event) => {
     const item = stockItems().find((entry) => entry.id === stockDeleteId);
     if (!item || !window.confirm(`Delete ${item.partName} from stock?`)) return;
     state.expenses = state.expenses.filter((entry) => entry.id !== stockDeleteId);
+    deleteRemoteRecords("expenses", stockDeleteId).catch(reportRemoteDeleteFailure);
     stockDrafts.delete(stockDeleteId);
     save();
     render();
@@ -2158,13 +2168,20 @@ document.addEventListener("click", (event) => {
     if (!customer) return;
     const vehicleIds = new Set(state.vehicles.filter((vehicle) => vehicle.owner === customer.id).map((vehicle) => vehicle.id));
     const jobIds = new Set(state.jobs.filter((job) => vehicleIds.has(job.vehicle)).map((job) => job.id));
-    const invoiceCount = state.invoices.filter((invoice) => jobIds.has(invoice.job)).length;
+    const invoiceIds = state.invoices.filter((invoice) => jobIds.has(invoice.job)).map((invoice) => invoice.id);
+    const invoiceCount = invoiceIds.length;
     const confirmed = window.confirm(`Delete ${customer.name}? This will also delete ${vehicleIds.size} vehicle(s), ${jobIds.size} job(s), and ${invoiceCount} invoice(s). This cannot be undone.`);
     if (!confirmed) return;
     state.customers = state.customers.filter((item) => item.id !== customer.id);
     state.vehicles = state.vehicles.filter((vehicle) => !vehicleIds.has(vehicle.id));
     state.jobs = state.jobs.filter((job) => !jobIds.has(job.id));
     state.invoices = state.invoices.filter((invoice) => !jobIds.has(invoice.job));
+    (async () => {
+      await deleteRemoteRecords("invoices", invoiceIds);
+      await deleteRemoteRecords("jobs", [...jobIds]);
+      await deleteRemoteRecords("vehicles", [...vehicleIds]);
+      await deleteRemoteRecords("customers", customer.id);
+    })().catch(reportRemoteDeleteFailure);
     if (document.querySelector('#customerForm [name="customerId"]').value === customer.id) resetCustomerForm();
     save();
     render();
@@ -2190,6 +2207,7 @@ document.addEventListener("click", (event) => {
   const expenseDeleteId = event.target.dataset.expenseDelete;
   if (expenseDeleteId) {
     state.expenses = state.expenses.filter((expense) => expense.id !== expenseDeleteId);
+    deleteRemoteRecords("expenses", expenseDeleteId).catch(reportRemoteDeleteFailure);
     save();
     render();
     return;
@@ -2211,10 +2229,15 @@ document.addEventListener("click", (event) => {
   const deleteJobId = event.target.dataset.jobDelete;
   if (deleteJobId) {
     const job = byId("jobs", deleteJobId);
+    const invoiceIds = state.invoices.filter((invoice) => invoice.job === deleteJobId).map((invoice) => invoice.id);
     const confirmed = window.confirm(`Delete ${job ? quoteTitle(job) : "this job"} and its invoice?`);
     if (!confirmed) return;
     state.jobs = state.jobs.filter((item) => item.id !== deleteJobId);
     state.invoices = state.invoices.filter((invoice) => invoice.job !== deleteJobId);
+    (async () => {
+      await deleteRemoteRecords("invoices", invoiceIds);
+      await deleteRemoteRecords("jobs", deleteJobId);
+    })().catch(reportRemoteDeleteFailure);
     save();
     render();
     return;
