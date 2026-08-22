@@ -495,6 +495,9 @@ function renderJobs() {
       const collectedInvoiceAction = !job.archived && job.status === "Collected" && invoice
         ? `<button class="small-button payment-button ${invoice.status === "Paid" ? "payment-recorded" : "payment-outstanding"}" type="button" data-invoice-toggle="${invoice.id}">${invoice.status === "Paid" ? "Paid" : "Not Paid"}</button>`
         : "";
+      const readyInvoiceEmailAction = !job.archived && job.status === "Ready" && invoice
+        ? `<button class="small-button email-invoice-button" type="button" data-invoice-email="${invoice.id}">Email invoice</button>`
+        : "";
       const editQuoteAction = job.status === "Collected" || job.archived
         ? ""
         : `<button class="small-button" type="button" data-job-edit="${job.id}">Edit quote</button>`;
@@ -524,8 +527,8 @@ function renderJobs() {
             ${job.advisories ? `<span class="job-advisory">Advisories: ${job.advisories}</span>` : ""}
           </div>
           <div class="row-actions">
-            <button class="small-button" type="button" data-job-history="${job.id}">History</button>
             ${editQuoteAction}
+            ${readyInvoiceEmailAction}
             ${collectedInvoiceAction}
             ${archivedActions}
           </div>

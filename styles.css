@@ -667,6 +667,18 @@ tr:last-child td {
   cursor: pointer;
 }
 
+.email-invoice-button {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 800;
+}
+
+.email-invoice-button:hover {
+  border-color: var(--accent-dark);
+  background: var(--accent-dark);
+}
+
 .danger-button {
   border-color: #fecaca;
   color: var(--bad);
