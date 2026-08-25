@@ -66,6 +66,7 @@ let remoteReloadTimer = null;
 let realtimeChannel = null;
 let remotePollTimer = null;
 let salesInactivityTimer = null;
+let checkingAccess = false;
 sessionStorage.removeItem("profitUnlocked");
 
 const supabaseClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1489,6 +1490,7 @@ function startLiveSync() {
   remotePollTimer = window.setInterval(() => {
     queueRemoteReload();
     refreshAdminLogs();
+    verifyCurrentAccess();
     if (activeHistoryJobId || document.querySelector("#jobHistory")?.classList.contains("active-view")) refreshJobAuditLogs();
   }, 3000);
 }
@@ -1516,6 +1518,24 @@ async function loadCurrentProfile(user) {
     return;
   }
   if (data) currentProfile = { ...data, role: String(data.role || "sales").trim().toLowerCase() };
+}
+
+async function verifyCurrentAccess() {
+  if (!currentUser || !supabaseClient || checkingAccess) return;
+  checkingAccess = true;
+  try {
+    const { data, error } = await supabaseClient
+      .from("profiles")
+      .select("role")
+      .eq("user_id", currentUser.id)
+      .maybeSingle();
+    if (error) return;
+    if (String(data?.role || "sales").trim().toLowerCase() === "blocked") {
+      await signOutUser("This account has been blocked. Contact an administrator.", "blocked logout");
+    }
+  } finally {
+    checkingAccess = false;
+  }
 }
 
 async function loadUserProfiles() {
@@ -1590,6 +1610,16 @@ async function handleSignedIn(user) {
   currentUser = user;
   setLoginMessage("Loading workshop data...");
   await loadCurrentProfile(user);
+  if (currentRole() === "blocked") {
+    await recordLoginAction("blocked login attempt", user);
+    await supabaseClient.auth.signOut();
+    currentUser = null;
+    currentProfile = null;
+    remoteReady = false;
+    showAuthenticatedApp(false);
+    setLoginMessage("This account has been blocked. Contact an administrator.");
+    return;
+  }
   await loadUserProfiles();
   await recordLoginAction("login", user);
   await loadStateFromSupabase();
