@@ -462,11 +462,13 @@ function renderDashboard() {
   const openJobs = state.jobs.filter((job) => job.status !== "Collected");
   const workshopQueue = state.jobs.filter((job) => job.status === "In progress");
   const dueToday = state.jobs.filter((job) => job.due === today && job.status !== "Collected");
-  const unpaid = state.invoices.filter((invoice) => invoice.status === "Unpaid");
+  const readyUnpaidJobs = state.jobs.filter((job) => job.status === "Ready" && invoiceForJob(job.id)?.status === "Unpaid");
+  const readyUnpaidLabour = readyUnpaidJobs.reduce((total, job) => total + jobLabourTotal(job), 0);
 
   document.querySelector("#openJobsCount").textContent = openJobs.length;
   document.querySelector("#dueTodayCount").textContent = dueToday.length;
-  document.querySelector("#unpaidInvoicesCount").textContent = unpaid.length;
+  document.querySelector("#unpaidInvoicesCount").textContent = readyUnpaidJobs.length;
+  document.querySelector("#unpaidInvoicesAmount").textContent = money(readyUnpaidLabour);
 
   document.querySelector("#queueList").innerHTML = workshopQueue.length
     ? workshopQueue.slice(0, 5).map((job) => `<div class="list-item"><div><strong>${quoteTitle(job)}</strong><div class="muted">${vehicleLabel(job.vehicle)} - job date ${formatDate(job.due)} - ${job.mechanic || "Unassigned"}</div></div>${statusBadge(job.status)}</div>`).join("")

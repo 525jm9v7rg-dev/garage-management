@@ -331,6 +331,16 @@ textarea {
   font-size: 2rem;
 }
 
+.stat-card .stat-detail {
+  margin-top: 8px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.stat-card .stat-detail span {
+  color: var(--text);
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: 1.5fr 1fr;
