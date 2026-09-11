@@ -1514,6 +1514,18 @@ function queueRecordForCloud(table, record) {
   queueRecordsForCloud([[table, record]]);
 }
 
+async function retryPendingQuoteSaveAutomatically() {
+  if (!remoteOutbox.length) return;
+  try {
+    const synced = await flushRemoteOutbox();
+    if (synced && pendingQuoteSave && jobDialog.open) {
+      completeQuoteSave(document.querySelector("#jobForm"), pendingQuoteSave.jobId);
+    }
+  } catch (error) {
+    console.error("Automatic quote retry failed", error);
+  }
+}
+
 async function broadcastRemoteChange() {
   if (!realtimeChannel) return;
   await withTimeout(
@@ -1571,7 +1583,7 @@ function startLiveSync() {
   realtimeChannel = channel.subscribe();
   window.clearInterval(remotePollTimer);
   remotePollTimer = window.setInterval(() => {
-    if (remoteOutbox.length) flushRemoteOutbox().catch((error) => console.error("Pending quote sync failed", error));
+    retryPendingQuoteSaveAutomatically();
     queueRemoteReload();
     refreshAdminLogs();
     verifyCurrentAccess();
@@ -1821,6 +1833,7 @@ document.querySelector("#logoutBtn").addEventListener("click", async () => {
 ["click", "keydown", "scroll", "mousemove", "touchstart"].forEach((eventName) => {
   window.addEventListener(eventName, resetSalesInactivityTimer, { passive: true });
 });
+window.addEventListener("online", retryPendingQuoteSaveAutomatically);
 
 document.querySelector("#newJobBtn").addEventListener("click", openNewQuoteDialog);
 document.querySelector("#exportDataBtn").addEventListener("click", exportData);
@@ -1938,8 +1951,8 @@ document.querySelector("#jobForm").addEventListener("submit", async (event) => {
     } catch (error) {
       console.error("Quote retry failed", error);
       retryButton.disabled = false;
-      retryButton.textContent = "Retry cloud save";
-      window.alert("The cloud still cannot confirm this quote. It remains safely queued on this device. Keep this page open and try again.");
+      retryButton.textContent = "Retry now";
+      window.alert("The cloud still cannot confirm this quote. Automatic retries will continue, and this window will close when the save is confirmed.");
     }
     return;
   }
@@ -2040,8 +2053,8 @@ document.querySelector("#jobForm").addEventListener("submit", async (event) => {
   } catch (error) {
     console.error("Quote direct save failed", error);
     saveButton.disabled = false;
-    saveButton.textContent = "Retry cloud save";
-    window.alert("The quote has not yet been confirmed by the cloud. It is safely queued on this device and will retry automatically. Keep this editor open and press Retry cloud save.");
+    saveButton.textContent = "Retry now";
+    window.alert("The quote has not yet been confirmed by the cloud. It is safely queued and will retry automatically. This window will close as soon as the save is confirmed.");
   }
 });
 
