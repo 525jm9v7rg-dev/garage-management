@@ -23,6 +23,7 @@ const PROFIT_PASSWORD = "240710";
 const SALES_INACTIVITY_MS = 10 * 60 * 1000;
 const REMOTE_REQUEST_TIMEOUT_MS = 10000;
 const STORAGE_KEY = "garageDeskStateFirstUse";
+const REMOTE_OUTBOX_KEY = "garageDeskRemoteOutbox";
 const SUPABASE_URL = "https://jlnfsafgonfuzuetgmhj.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpsbmZzYWZnb25mdXp1ZXRnbWhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5MzQ4MzcsImV4cCI6MjA5OTUxMDgzN30.Nwg6AfGPGGiofZjO4BLubjRsx6QqRSgEiBwvZ-LKjCQ";
 const DATA_TABLES = ["customers", "vehicles", "jobs", "invoices", "expenses"];
@@ -67,6 +68,10 @@ let realtimeChannel = null;
 let remotePollTimer = null;
 let salesInactivityTimer = null;
 let checkingAccess = false;
+let remoteOutbox = JSON.parse(localStorage.getItem(REMOTE_OUTBOX_KEY) || "[]");
+if (!Array.isArray(remoteOutbox)) remoteOutbox = [];
+let outboxSyncing = false;
+let pendingQuoteSave = null;
 sessionStorage.removeItem("profitUnlocked");
 
 const supabaseClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -87,6 +92,16 @@ const newCustomerFields = document.querySelector("#newCustomerFields");
 const saveLocal = () => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 };
+const persistRemoteOutbox = () => localStorage.setItem(REMOTE_OUTBOX_KEY, JSON.stringify(remoteOutbox));
+const enqueueRemoteRecords = (records) => {
+  records.forEach(([table, record]) => {
+    if (!DATA_TABLES.includes(table) || !record?.id) return;
+    remoteOutbox = remoteOutbox.filter((entry) => !(entry.table === table && entry.record.id === record.id));
+    remoteOutbox.push({ table, record: JSON.parse(JSON.stringify(record)) });
+  });
+  persistRemoteOutbox();
+};
+const activeJobs = () => state.jobs.filter((job) => !job.deleted);
 const save = () => {
   saveLocal();
   queueRemoteSave();
@@ -142,9 +157,9 @@ const isJobPaidInMonth = (job, month = null) => {
   const invoice = invoiceForJob(job.id);
   return invoice?.status === "Paid" && (!month || monthKey(invoice.paidDate) === month);
 };
-const paidLabourIncome = (month = null) => state.jobs.reduce((total, job) => total + (isJobPaidInMonth(job, month) ? jobLabourTotal(job) : 0), 0);
+const paidLabourIncome = (month = null) => activeJobs().reduce((total, job) => total + (isJobPaidInMonth(job, month) ? jobLabourTotal(job) : 0), 0);
 const profit = (month = null) => paidLabourIncome(month) - expensesTotal(month);
-const paidLabourIncomeThrough = (month) => state.jobs.reduce((total, job) => {
+const paidLabourIncomeThrough = (month) => activeJobs().reduce((total, job) => {
   const invoice = invoiceForJob(job.id);
   return total + (invoice?.status === "Paid" && monthKey(invoice.paidDate) <= month ? jobLabourTotal(job) : 0);
 }, 0);
@@ -229,6 +244,9 @@ function normalizeState() {
     if (vehicle.motDue === undefined) vehicle.motDue = "";
   });
   state.jobs.forEach((job) => {
+    if (job.deleted === undefined) job.deleted = false;
+    if (job.deletedAt === undefined) job.deletedAt = "";
+    if (job.deletedBy === undefined) job.deletedBy = "";
     if (!Array.isArray(job.lineItems)) job.lineItems = [];
     job.lineItems = job.lineItems.map((item) => {
       const type = item.type || "part";
@@ -296,7 +314,7 @@ function mechanicOptions() {
     .filter((expense) => expense.type === "mechanic" && expense.mechanicName)
     .map((expense) => canonicalMechanicName(expense.mechanicName))
     .filter(Boolean);
-  const assignedNames = state.jobs
+  const assignedNames = activeJobs()
     .map((job) => canonicalMechanicName(job.mechanic))
     .filter((name) => name && name !== "Unassigned");
   return ["Unassigned", ...new Set([...DEFAULT_MECHANICS, ...expenseNames, ...assignedNames])];
@@ -324,7 +342,7 @@ function jobEstimatedHours(job) {
 }
 
 function scheduledJobsForMechanic(mechanic, excludeJobId = null) {
-  return state.jobs.filter((job) => job.id !== excludeJobId
+  return activeJobs().filter((job) => job.id !== excludeJobId
     && job.mechanic === mechanic
     && ["Booked", "In progress"].includes(job.status));
 }
@@ -412,11 +430,11 @@ function isAdmin() {
 }
 
 function canView(viewId) {
-  return !["stock", "profit", "jobHistory", "userLogs"].includes(viewId) || isAdmin();
+  return !["stock", "profit", "jobHistory", "recycleBin", "userLogs"].includes(viewId) || isAdmin();
 }
 
 function applyRoleAccess() {
-  document.querySelectorAll('[data-view="stock"], [data-view="profit"], [data-view="jobHistory"], [data-view="userLogs"]').forEach((item) => {
+  document.querySelectorAll('[data-view="stock"], [data-view="profit"], [data-view="jobHistory"], [data-view="recycleBin"], [data-view="userLogs"]').forEach((item) => {
     item.classList.toggle("hidden", !isAdmin());
   });
   document.querySelector("#workLogUserField").classList.toggle("hidden", !isAdmin());
@@ -434,7 +452,7 @@ function setView(viewId) {
   if (viewId !== "profit") profitUnlocked = false;
   views.forEach((view) => view.classList.toggle("active-view", view.id === viewId));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === viewId));
-  pageTitle.textContent = viewId === "jobs" ? "Quotes" : viewId === "jobHistory" ? "Job History" : viewId === "userLogs" ? "User Logs" : viewId === "workLogs" ? "Work Log" : viewId[0].toUpperCase() + viewId.slice(1);
+  pageTitle.textContent = viewId === "jobs" ? "Quotes" : viewId === "jobHistory" ? "Job History" : viewId === "recycleBin" ? "Recycle Bin" : viewId === "userLogs" ? "User Logs" : viewId === "workLogs" ? "Work Log" : viewId[0].toUpperCase() + viewId.slice(1);
   render();
   if (viewId === "jobHistory") refreshJobAuditLogs();
   if (viewId === "userLogs") refreshAdminLogs();
@@ -459,10 +477,11 @@ function statusTone(status) {
 }
 
 function renderDashboard() {
-  const openJobs = state.jobs.filter((job) => job.status !== "Collected");
-  const workshopQueue = state.jobs.filter((job) => job.status === "In progress");
-  const dueToday = state.jobs.filter((job) => job.due === today && job.status !== "Collected");
-  const readyUnpaidJobs = state.jobs.filter((job) => job.status === "Ready" && invoiceForJob(job.id)?.status === "Unpaid");
+  const visibleJobs = activeJobs();
+  const openJobs = visibleJobs.filter((job) => job.status !== "Collected");
+  const workshopQueue = visibleJobs.filter((job) => job.status === "In progress");
+  const dueToday = visibleJobs.filter((job) => job.due === today && job.status !== "Collected");
+  const readyUnpaidJobs = visibleJobs.filter((job) => job.status === "Ready" && invoiceForJob(job.id)?.status === "Unpaid");
   const readyUnpaidLabour = readyUnpaidJobs.reduce((total, job) => total + jobLabourTotal(job), 0);
 
   document.querySelector("#openJobsCount").textContent = openJobs.length;
@@ -476,7 +495,7 @@ function renderDashboard() {
 }
 
 function renderJobs() {
-  const filtered = state.jobs.filter((job) => {
+  const filtered = activeJobs().filter((job) => {
     const statusMatches = currentJobFilter === "Archived"
       ? job.archived
       : !job.archived && (currentJobFilter === "all" || job.status === currentJobFilter);
@@ -515,7 +534,7 @@ function renderJobs() {
               <strong class="job-customer-name">${customer?.name || "Unknown customer"}</strong>
               <span class="muted">${quoteTitle(job)} - ${byId("vehicles", job.vehicle)?.model || "Unknown model"}</span>
             </div>
-            ${job.archived ? "" : `<button class="job-delete-x" type="button" data-job-delete="${job.id}" aria-label="Delete ${vehicleRegistration(job.vehicle)} job" title="Delete job">×</button>`}
+            ${job.archived ? "" : `<button class="job-delete-x" type="button" data-job-delete="${job.id}" aria-label="Move ${vehicleRegistration(job.vehicle)} job to Recycle Bin" title="Move to Recycle Bin">×</button>`}
           </div>
           <div class="job-card-status">${statusBadge(job.archived ? "Archived" : job.status)}</div>
           <div class="job-meta">
@@ -567,7 +586,7 @@ function renderCalendar() {
       const inMonth = dayNumber >= 1 && dayNumber <= monthEnd.getDate();
       const date = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), dayNumber);
       const calendarDay = inMonth ? dateKey(date) : "";
-      const dayJobs = inMonth ? state.jobs.filter((job) => job.due === calendarDay) : [];
+      const dayJobs = inMonth ? activeJobs().filter((job) => job.due === calendarDay) : [];
       return `
         <div class="calendar-day ${inMonth ? "" : "muted-day"} ${calendarDay === today ? "today" : ""}">
           <div class="calendar-date">${inMonth ? dayNumber : ""}</div>
@@ -599,7 +618,8 @@ function renderCustomers() {
     .map((customer) => {
       const vehicles = customerVehicles(customer.id);
       const vehicleList = vehicles.length ? vehicles.map((vehicle) => `<div><strong>${vehicle.model}</strong><br><span class="muted">${vehicle.plate} - ${Number(vehicle.mileage || 0).toLocaleString()} mi - MOT ${formatDate(vehicle.motDue)}</span></div>`).join("") : "-";
-      return `<tr><td><strong>${customer.name}</strong><br><span class="muted">${customer.phone}<br>${customer.email || "-"}<br>${customer.address || "No address saved"}<br>${customer.vatCustomer ? "VAT customer" : "No VAT"}</span><br><div class="row-actions"><button class="small-button" data-customer-edit="${customer.id}">Edit</button><button class="small-button" data-customer-vat="${customer.id}">${customer.vatCustomer ? "Remove VAT" : "Mark VAT"}</button><button class="small-button danger-button" data-customer-delete="${customer.id}">Delete</button></div></td><td>${vehicleList}</td></tr>`;
+      const deleteButton = isAdmin() ? `<button class="small-button danger-button" data-customer-delete="${customer.id}">Delete</button>` : "";
+      return `<tr><td><strong>${customer.name}</strong><br><span class="muted">${customer.phone}<br>${customer.email || "-"}<br>${customer.address || "No address saved"}<br>${customer.vatCustomer ? "VAT customer" : "No VAT"}</span><br><div class="row-actions"><button class="small-button" data-customer-edit="${customer.id}">Edit</button><button class="small-button" data-customer-vat="${customer.id}">${customer.vatCustomer ? "Remove VAT" : "Mark VAT"}</button>${deleteButton}</div></td><td>${vehicleList}</td></tr>`;
     })
     .join("");
 
@@ -649,7 +669,10 @@ function renderVehicles() {
 
 function renderInvoices() {
   const rows = state.invoices
-    .filter((invoice) => !searchTerm || [invoice.id, invoice.status, vehicleLabel(byId("jobs", invoice.job)?.vehicle)].join(" ").toLowerCase().includes(searchTerm))
+    .filter((invoice) => {
+      const job = byId("jobs", invoice.job);
+      return job && !job.deleted && (!searchTerm || [invoice.id, invoice.status, vehicleLabel(job.vehicle)].join(" ").toLowerCase().includes(searchTerm));
+    })
     .map((invoice) => {
       const job = byId("jobs", invoice.job);
       const customer = customerForJob(job);
@@ -677,7 +700,7 @@ function renderProfit() {
   if (!selectedProfitMonth || !availableMonths.includes(selectedProfitMonth)) selectedProfitMonth = availableMonths[0];
   const selectedMonthName = monthName(selectedProfitMonth);
   const overallNetProfit = profitThrough(selectedProfitMonth);
-  const jobRows = state.jobs.filter((job) => isJobPaidInMonth(job, selectedProfitMonth)).map((job) => {
+  const jobRows = activeJobs().filter((job) => isJobPaidInMonth(job, selectedProfitMonth)).map((job) => {
     const invoice = invoiceForJob(job.id);
     const paid = invoice?.status === "Paid";
     const countedThisMonth = isJobPaidInMonth(job, selectedProfitMonth) ? jobLabourTotal(job) : 0;
@@ -916,7 +939,10 @@ function auditFieldLabel(field) {
     readyDate: "Ready date",
     estimatedHours: "Estimated hours",
     archived: "Archived",
-    archivedAt: "Archived date"
+    archivedAt: "Archived date",
+    deleted: "In Recycle Bin",
+    deletedAt: "Removed date",
+    deletedBy: "Removed by"
   };
   return labels[field] || field.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase());
 }
@@ -957,6 +983,23 @@ function renderJobHistoryList() {
     return `<tr><td>${entry.changed_at ? new Date(entry.changed_at).toLocaleString("en-GB") : "-"}</td><td><strong>${vehicle?.plate || jobName}</strong></td><td>${entry.changed_by_email || "Unknown user"}</td><td>${entry.action}</td><td><button class="small-button" data-job-history="${entry.job_id}">View changes</button></td></tr>`;
   }).join("");
   panel.innerHTML = `<h2>All job history</h2><table><thead><tr><th>Time</th><th>Job</th><th>User</th><th>Action</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="5">No job history recorded yet.</td></tr>`}</tbody></table>`;
+}
+
+function renderRecycleBin() {
+  const panel = document.querySelector("#recycleBinList");
+  if (!panel) return;
+  if (!isAdmin()) {
+    panel.innerHTML = `<div class="empty">You do not have permission to view the Recycle Bin.</div>`;
+    return;
+  }
+  const deletedJobs = state.jobs
+    .filter((job) => job.deleted)
+    .sort((first, second) => String(second.deletedAt || "").localeCompare(String(first.deletedAt || "")));
+  const rows = deletedJobs.map((job) => {
+    const deletedTime = job.deletedAt ? new Date(job.deletedAt).toLocaleString("en-GB") : "-";
+    return `<tr><td><strong>${vehicleRegistration(job.vehicle)}</strong><br><span class="muted">${vehicleLabel(job.vehicle)}</span></td><td>${quoteTitle(job)}</td><td>${deletedTime}</td><td>${job.deletedBy || "Unknown user"}</td><td><div class="row-actions"><button class="small-button" data-job-restore="${job.id}">Restore</button><button class="small-button danger-button" data-job-delete-permanent="${job.id}">Delete permanently</button></div></td></tr>`;
+  }).join("");
+  panel.innerHTML = `<h2>Recycle Bin</h2><p class="muted">Removed jobs stay here until an administrator restores or permanently deletes them.</p><table><thead><tr><th>Vehicle</th><th>Job</th><th>Removed</th><th>Removed by</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="5">The Recycle Bin is empty.</td></tr>`}</tbody></table>`;
 }
 
 function renderSelects() {
@@ -1388,7 +1431,15 @@ async function loadStateFromSupabase({ pushLocalWhenEmpty = true, replaceWhenEmp
     if (remoteState[table].length) hasRemoteData = true;
   }
 
-  if ((hasRemoteData || replaceWhenEmpty) && !remoteSavePending) state = remoteState;
+  if (hasRemoteData || replaceWhenEmpty) {
+    state = remoteState;
+    remoteOutbox.forEach(({ table, record }) => {
+      if (!DATA_TABLES.includes(table) || !record?.id) return;
+      const existingIndex = state[table].findIndex((item) => item.id === record.id);
+      if (existingIndex >= 0) state[table][existingIndex] = record;
+      else state[table].unshift(record);
+    });
+  }
   normalizeState();
   remoteReady = true;
 
@@ -1431,6 +1482,36 @@ async function saveRemoteRecord(table, item) {
     `Saving ${table} to the cloud timed out.`
   );
   if (error) throw error;
+}
+
+async function flushRemoteOutbox() {
+  if (!remoteReady || !supabaseClient || outboxSyncing || !remoteOutbox.length) return !remoteOutbox.length;
+  outboxSyncing = true;
+  remoteSavePending = true;
+  try {
+    while (remoteOutbox.length) {
+      const entry = remoteOutbox[0];
+      await saveRemoteRecord(entry.table, entry.record);
+      remoteOutbox.shift();
+      persistRemoteOutbox();
+    }
+    await broadcastRemoteChange();
+    remoteSavePending = false;
+    return true;
+  } finally {
+    outboxSyncing = false;
+  }
+}
+
+function queueRecordsForCloud(records) {
+  saveLocal();
+  enqueueRemoteRecords(records);
+  remoteSavePending = true;
+  flushRemoteOutbox().catch((error) => console.error("Pending record sync failed", error));
+}
+
+function queueRecordForCloud(table, record) {
+  queueRecordsForCloud([[table, record]]);
 }
 
 async function broadcastRemoteChange() {
@@ -1490,6 +1571,7 @@ function startLiveSync() {
   realtimeChannel = channel.subscribe();
   window.clearInterval(remotePollTimer);
   remotePollTimer = window.setInterval(() => {
+    if (remoteOutbox.length) flushRemoteOutbox().catch((error) => console.error("Pending quote sync failed", error));
     queueRemoteReload();
     refreshAdminLogs();
     verifyCurrentAccess();
@@ -1624,7 +1706,15 @@ async function handleSignedIn(user) {
   }
   await loadUserProfiles();
   await recordLoginAction("login", user);
+  remoteSavePending = remoteOutbox.length > 0;
   await loadStateFromSupabase();
+  if (remoteOutbox.length) {
+    try {
+      await flushRemoteOutbox();
+    } catch (error) {
+      console.error("Pending quote recovery failed", error);
+    }
+  }
   await loadLoginLogs();
   await loadJobAuditLogs();
   render();
@@ -1674,6 +1764,7 @@ function render() {
   renderStock();
   renderProfit();
   renderJobHistoryList();
+  renderRecycleBin();
   renderUserLogs();
 }
 
@@ -1747,7 +1838,10 @@ document.querySelector("#nextMonthBtn").addEventListener("click", () => {
   renderCalendar();
 });
 
-document.querySelector("#closeDialog").addEventListener("click", () => jobDialog.close());
+document.querySelector("#closeDialog").addEventListener("click", () => {
+  pendingQuoteSave = null;
+  jobDialog.close();
+});
 document.querySelector("#closeInvoiceDialog").addEventListener("click", () => invoiceDialog.close());
 document.querySelector("#closeJobHistoryDialog").addEventListener("click", () => jobHistoryDialog.close());
 jobHistoryDialog.addEventListener("close", () => {
@@ -1817,8 +1911,38 @@ function addQuoteItem(type, nameSelector, qtySelector, priceSelector, statusSele
 document.querySelector("#addLabourBtn").addEventListener("click", () => addQuoteItem("labour", null, "#labourItemQty", "#labourItemPrice"));
 document.querySelector("#addPartBtn").addEventListener("click", () => addQuoteItem("part", "#partItemName", "#partItemQty", "#partItemPrice", "#partItemStatus"));
 
+function completeQuoteSave(form, jobId) {
+  form.reset();
+  activeQuoteItems = [];
+  activeEditJobId = null;
+  pendingQuoteSave = null;
+  renderQuoteBuilder();
+  setVehicleMode("new");
+  const saveButton = document.querySelector("#saveJobBtn");
+  saveButton.disabled = false;
+  saveButton.textContent = "Create quote";
+  jobDialog.close();
+  setView("jobs");
+  window.alert(`Saved successfully. Job reference: ${jobId.toUpperCase()}`);
+}
+
 document.querySelector("#jobForm").addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (pendingQuoteSave) {
+    const retryButton = document.querySelector("#saveJobBtn");
+    retryButton.disabled = true;
+    retryButton.textContent = "Retrying cloud save...";
+    try {
+      await flushRemoteOutbox();
+      completeQuoteSave(event.currentTarget, pendingQuoteSave.jobId);
+    } catch (error) {
+      console.error("Quote retry failed", error);
+      retryButton.disabled = false;
+      retryButton.textContent = "Retry cloud save";
+      window.alert("The cloud still cannot confirm this quote. It remains safely queued on this device. Keep this page open and try again.");
+    }
+    return;
+  }
   if (!activeQuoteItems.length) {
     window.alert("Add at least one labour or part line before saving the quote.");
     return;
@@ -1907,31 +2031,18 @@ document.querySelector("#jobForm").addEventListener("submit", async (event) => {
   if (invoice) remoteRecords.push(["invoices", invoice]);
   updateJobArchive(job);
   saveLocal();
-
-  // The quote is safely stored on this device. Close the editor immediately so
-  // a slow cloud connection cannot leave users stuck on "Saving quote...".
-  event.currentTarget.reset();
-  activeQuoteItems = [];
-  activeEditJobId = null;
-  renderQuoteBuilder();
-  setVehicleMode("new");
-  saveButton.disabled = false;
-  saveButton.textContent = "Create quote";
-  jobDialog.close();
-  setView("jobs");
-
-  let syncDelayed = false;
+  enqueueRemoteRecords(remoteRecords);
+  pendingQuoteSave = { jobId: job.id };
   remoteSavePending = true;
   try {
-    for (const [table, record] of remoteRecords) await saveRemoteRecord(table, record);
-    await broadcastRemoteChange();
-    remoteSavePending = false;
+    await flushRemoteOutbox();
+    completeQuoteSave(event.currentTarget, job.id);
   } catch (error) {
-    syncDelayed = true;
     console.error("Quote direct save failed", error);
-    queueRemoteSave();
+    saveButton.disabled = false;
+    saveButton.textContent = "Retry cloud save";
+    window.alert("The quote has not yet been confirmed by the cloud. It is safely queued on this device and will retry automatically. Keep this editor open and press Retry cloud save.");
   }
-  if (syncDelayed) window.alert("The quote is saved on this device. Cloud sync is retrying automatically.");
 });
 
 document.querySelector("#customerForm").addEventListener("submit", (event) => {
@@ -2094,7 +2205,7 @@ document.addEventListener("change", (event) => {
     const invoice = invoiceForJob(job.id);
     if (invoice) invoice.due = job.readyDate || "";
     updateJobArchive(job);
-    save();
+    queueRecordsForCloud([["jobs", job], ...[invoice ? ["invoices", invoice] : null].filter(Boolean)]);
     render();
   }
   if (mechanicJobId) {
@@ -2109,12 +2220,46 @@ document.addEventListener("change", (event) => {
       }
     }
     job.mechanic = nextMechanic;
-    save();
+    queueRecordForCloud("jobs", job);
     render();
   }
 });
 
 document.addEventListener("click", (event) => {
+  const restoreJobId = event.target.closest("[data-job-restore]")?.dataset.jobRestore;
+  if (restoreJobId) {
+    if (!isAdmin()) return;
+    const job = byId("jobs", restoreJobId);
+    if (!job?.deleted) return;
+    job.deleted = false;
+    job.deletedAt = "";
+    job.deletedBy = "";
+    queueRecordForCloud("jobs", job);
+    render();
+    window.alert(`Job ${job.id.toUpperCase()} has been restored.`);
+    return;
+  }
+
+  const permanentJobId = event.target.closest("[data-job-delete-permanent]")?.dataset.jobDeletePermanent;
+  if (permanentJobId) {
+    if (!isAdmin()) {
+      window.alert("Only an administrator can permanently delete jobs.");
+      return;
+    }
+    const job = byId("jobs", permanentJobId);
+    if (!job?.deleted || !window.confirm(`Permanently delete job ${job.id.toUpperCase()} and its invoice? This cannot be undone.`)) return;
+    const invoiceIds = state.invoices.filter((invoice) => invoice.job === permanentJobId).map((invoice) => invoice.id);
+    state.jobs = state.jobs.filter((item) => item.id !== permanentJobId);
+    state.invoices = state.invoices.filter((invoice) => invoice.job !== permanentJobId);
+    saveLocal();
+    (async () => {
+      await deleteRemoteRecords("invoices", invoiceIds);
+      await deleteRemoteRecords("jobs", permanentJobId);
+    })().catch(reportRemoteDeleteFailure);
+    render();
+    return;
+  }
+
   const historyJobId = event.target.closest("[data-job-history]")?.dataset.jobHistory;
   if (historyJobId) {
     loadJobAuditLogs().then(() => showJobHistory(historyJobId));
@@ -2196,6 +2341,10 @@ document.addEventListener("click", (event) => {
 
   const customerDeleteId = event.target.closest("[data-customer-delete]")?.dataset.customerDelete;
   if (customerDeleteId) {
+    if (!isAdmin()) {
+      window.alert("Only an administrator can permanently delete customers and their records.");
+      return;
+    }
     const customer = byId("customers", customerDeleteId);
     if (!customer) return;
     const vehicleIds = new Set(state.vehicles.filter((vehicle) => vehicle.owner === customer.id).map((vehicle) => vehicle.id));
@@ -2261,16 +2410,12 @@ document.addEventListener("click", (event) => {
   const deleteJobId = event.target.dataset.jobDelete;
   if (deleteJobId) {
     const job = byId("jobs", deleteJobId);
-    const invoiceIds = state.invoices.filter((invoice) => invoice.job === deleteJobId).map((invoice) => invoice.id);
-    const confirmed = window.confirm(`Delete ${job ? quoteTitle(job) : "this job"} and its invoice?`);
+    const confirmed = window.confirm(`Move ${job ? quoteTitle(job) : "this job"} to the Recycle Bin? Its invoice will be hidden but not deleted.`);
     if (!confirmed) return;
-    state.jobs = state.jobs.filter((item) => item.id !== deleteJobId);
-    state.invoices = state.invoices.filter((invoice) => invoice.job !== deleteJobId);
-    (async () => {
-      await deleteRemoteRecords("invoices", invoiceIds);
-      await deleteRemoteRecords("jobs", deleteJobId);
-    })().catch(reportRemoteDeleteFailure);
-    save();
+    job.deleted = true;
+    job.deletedAt = new Date().toISOString();
+    job.deletedBy = currentUser?.email || "Unknown user";
+    queueRecordForCloud("jobs", job);
     render();
     return;
   }
