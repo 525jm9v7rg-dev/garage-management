@@ -2129,7 +2129,7 @@ document.querySelector("#stockForm").addEventListener("submit", (event) => {
     window.alert("Enter a valid pound amount.");
     return;
   }
-  state.expenses.push({
+  const stockItem = {
     id: makeId("s"),
     type: STOCK_ITEM_TYPE,
     partName: String(form.get("partName") || "").trim(),
@@ -2138,9 +2138,10 @@ document.querySelector("#stockForm").addEventListener("submit", (event) => {
     soldFor: 0,
     amount: 0,
     createdAt: new Date().toISOString()
-  });
+  };
+  state.expenses.push(stockItem);
   event.currentTarget.reset();
-  save();
+  queueRecordForCloud("expenses", stockItem);
   render();
 });
 
@@ -2341,7 +2342,7 @@ document.addEventListener("click", (event) => {
     item.invested = enteredInvested;
     item.soldFor = enteredSoldFor;
     stockDrafts.delete(stockSaveId);
-    save();
+    queueRecordForCloud("expenses", item);
     render();
     return;
   }
